@@ -1,0 +1,40 @@
+services:
+  api:
+    environment:
+      APP_ENV: staging
+      API_LOG_LEVEL: INFO
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:?set API_CORS_ORIGINS}
+      DB_FALLBACK_ENABLED: "false"
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: epi_engine
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?set CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-epi-engine}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-epi-engine-clients}
+    restart: unless-stopped
+
+  web:
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?set NEXT_PUBLIC_API_BASE_URL}
+      NEXT_PUBLIC_API_AUTH_TOKEN: ${NEXT_PUBLIC_API_AUTH_TOKEN:?set NEXT_PUBLIC_API_AUTH_TOKEN}
+    restart: unless-stopped
+
+  worker:
+    environment:
+      APP_ENV: staging
+      CLICKHOUSE_URL: http://clickhouse:8123
+    command: ["python", "-c", "import time; print('worker ready (staging)'); time.sleep(10**9)"]
+    restart: unless-stopped
+
+  clickhouse:
+    environment:
+      CLICKHOUSE_DB: epi_engine
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?set CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:

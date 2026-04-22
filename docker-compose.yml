@@ -1,0 +1,50 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      APP_ENV: development
+      API_LOG_LEVEL: INFO
+      API_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-epi_engine_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-epi_engine_dev_password}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-secret}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-epi-engine}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-epi-engine-clients}
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_API_AUTH_TOKEN: ${NEXT_PUBLIC_API_AUTH_TOKEN:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server
+    environment:
+      CLICKHOUSE_DB: epi_engine
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-epi_engine_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-epi_engine_dev_password}
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      APP_ENV: development
+      CLICKHOUSE_URL: http://clickhouse:8123
+    depends_on:
+      - clickhouse
+    command: ["python", "-c", "import time; print('worker ready (development)'); time.sleep(10**9)"]

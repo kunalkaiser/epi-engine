@@ -1,0 +1,9 @@
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  - hostname: staging.epi-engine.example
+    service: http://web:3000
+  - hostname: staging-api.epi-engine.example
+    service: http://api:8000
+  - service: http_status:404
