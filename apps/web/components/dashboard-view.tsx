@@ -5,11 +5,16 @@ import { useEffect, useState } from "react";
 import { AppShell } from "./app-shell";
 import { ChartBars } from "./chart-bars";
 import { DataState } from "./data-state";
-import { fetchDiseases, fetchIncidence, fetchTopIndications, isEmptyResponse, type ApiState } from "../lib/api";
-import type { DiseasesResponse, IncidenceResponse, TopIndicationsResponse } from "../lib/types";
+import { fetchDebugSnapshot, fetchDiseases, fetchIncidence, fetchTopIndications, isEmptyResponse, type ApiState } from "../lib/api";
+import type { DebugSnapshot, DiseasesResponse, IncidenceResponse, TopIndicationsResponse } from "../lib/types";
 
 export function DashboardView() {
   const [reloadKey, setReloadKey] = useState(0);
+  const [debugState, setDebugState] = useState<ApiState<DebugSnapshot>>({
+    status: "loading",
+    data: null,
+    error: null,
+  });
   const [diseasesState, setDiseasesState] = useState<ApiState<DiseasesResponse>>({
     status: "loading",
     data: null,
@@ -28,17 +33,20 @@ export function DashboardView() {
 
   useEffect(() => {
     async function loadDashboard() {
+      setDebugState({ status: "loading", data: null, error: null });
       setDiseasesState({ status: "loading", data: null, error: null });
       setIncidenceState({ status: "loading", data: null, error: null });
       setIndicationsState({ status: "loading", data: null, error: null });
 
       try {
-        const [diseases, incidence, indications] = await Promise.all([
+        const [debug, diseases, incidence, indications] = await Promise.all([
+          fetchDebugSnapshot(),
           fetchDiseases(1, 6),
           fetchIncidence({ page: 1, pageSize: 6 }),
           fetchTopIndications({ page: 1, pageSize: 5, limit: 5 }),
         ]);
 
+        setDebugState({ status: "success", data: debug, error: null });
         setDiseasesState({
           status: isEmptyResponse(diseases) ? "empty" : "success",
           data: diseases,
@@ -56,6 +64,7 @@ export function DashboardView() {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown API error";
+        setDebugState({ status: "error", data: null, error: message });
         setDiseasesState({ status: "error", data: null, error: message });
         setIncidenceState({ status: "error", data: null, error: message });
         setIndicationsState({ status: "error", data: null, error: message });
@@ -63,6 +72,13 @@ export function DashboardView() {
     }
 
     void loadDashboard();
+    const intervalId = globalThis.setInterval(() => {
+      void loadDashboard();
+    }, 30000);
+
+    return () => {
+      globalThis.clearInterval(intervalId);
+    };
   }, [reloadKey]);
 
   const retry = () => {
@@ -71,6 +87,12 @@ export function DashboardView() {
 
   const topDisease = incidenceState.data?.items[0];
   const topIndication = indicationsState.data?.items[0];
+  const incidenceSummary =
+    incidenceState.status === "empty"
+      ? "Connected to the API, but no incidence rows are available yet."
+      : topDisease
+        ? `${topDisease.diseaseName} has the highest recent incidence in the loaded dashboard slice.`
+        : "Recent disease burden will appear here after loading.";
 
   return (
     <AppShell
@@ -110,9 +132,7 @@ export function DashboardView() {
               </p>
             </div>
             <div className="status-note">
-              {topDisease
-                ? `${topDisease.diseaseName} has the highest recent incidence in the loaded dashboard slice.`
-                : "Recent disease burden will appear here after loading."}
+              {incidenceSummary}
             </div>
           </div>
         </section>
@@ -137,6 +157,8 @@ export function DashboardView() {
           </article>
         </section>
 
+        {renderDebugPanel(debugState)}
+
         <section className="two-column">
           {renderDashboardDiseasePanel(diseasesState, retry)}
           {renderDashboardIncidencePanel(incidenceState, retry)}
@@ -148,6 +170,68 @@ export function DashboardView() {
   );
 }
 
+function renderDebugPanel(state: ApiState<DebugSnapshot>) {
+  if (state.status === "loading") {
+    return <DataState status="loading" title="Running startup diagnostics" detail="Checking frontend, backend, auth, and endpoint health." />;
+  }
+  if (state.status === "error" || !state.data) {
+    return <DataState status="error" title="Diagnostics unavailable" detail={state.error ?? "Debug endpoint did not respond."} />;
+  }
+
+  return (
+    <section className="panel">
+      <div className="section-heading">
+        <div>
+          <h2 className="section-title">Health and Debug</h2>
+          <p className="section-copy">Request-time connection checks for frontend, backend auth, and dashboard data endpoints.</p>
+        </div>
+      </div>
+      <div className="debug-grid">
+        <DebugItem label="Frontend status" status={state.data.frontend.status} detail={state.data.frontend.detail} />
+        <DebugItem
+          label="Backend status"
+          status={state.data.backend.status}
+          detail={`${state.data.backend.detail} (url: ${state.data.backend.baseUrl}, source: ${state.data.backend.baseUrlSource}, configured: ${state.data.backend.baseUrlConfigured ? "yes" : "no"})`}
+        />
+        <DebugItem
+          label="Auth status"
+          status={state.data.auth.status}
+          detail={`${state.data.auth.detail} (role: ${state.data.auth.role}, token source: ${state.data.auth.tokenSource}, attached: ${state.data.auth.attached ? "yes" : "no"})`}
+        />
+        <DebugItem label="Catalog endpoint" status={state.data.endpoints.catalog.status} detail={state.data.endpoints.catalog.detail} />
+        <DebugItem
+          label="Incidence endpoint"
+          status={state.data.endpoints.incidence.status}
+          detail={state.data.endpoints.incidence.detail}
+        />
+        <DebugItem
+          label="Indication endpoint"
+          status={state.data.endpoints.indications.status}
+          detail={state.data.endpoints.indications.detail}
+        />
+      </div>
+    </section>
+  );
+}
+
+type DebugItemProps = {
+  label: string;
+  status: "checking" | "ok" | "error";
+  detail: string;
+};
+
+function DebugItem({ label, status, detail }: DebugItemProps) {
+  return (
+    <article className={`debug-item debug-item-${status}`}>
+      <div className="debug-item-header">
+        <strong>{label}</strong>
+        <span className="pill">{status}</span>
+      </div>
+      <p className="stat-meta">{detail}</p>
+    </article>
+  );
+}
+
 function renderDashboardDiseasePanel(state: ApiState<DiseasesResponse>, onRetry: () => void) {
   if (state.status === "loading") {
     return <DataState status="loading" title="Loading disease catalog" detail="Fetching disease metadata from the API." />;
@@ -156,7 +240,13 @@ function renderDashboardDiseasePanel(state: ApiState<DiseasesResponse>, onRetry:
     return <DataState status="error" title="Disease catalog unavailable" detail={state.error} onRetry={onRetry} />;
   }
   if (state.status === "empty" || !state.data) {
-    return <DataState status="empty" title="No diseases returned" detail="The API returned an empty disease catalog." />;
+    return (
+      <DataState
+        status="empty"
+        title="No data available yet"
+        detail="Connected to the API, but there are no disease rows yet for this environment."
+      />
+    );
   }
 
   return (
@@ -201,7 +291,13 @@ function renderDashboardIncidencePanel(state: ApiState<IncidenceResponse>, onRet
     return <DataState status="error" title="Incidence unavailable" detail={state.error} onRetry={onRetry} />;
   }
   if (state.status === "empty" || !state.data) {
-    return <DataState status="empty" title="No incidence data" detail="The API returned no incidence rows." />;
+    return (
+      <DataState
+        status="empty"
+        title="No data available yet"
+        detail="Connected to the API, but there are no incidence rows yet for this environment."
+      />
+    );
   }
 
   return (

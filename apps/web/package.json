@@ -2,9 +2,11 @@
   "name": "epi-engine-web",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "validate:env": "node scripts/validate-env.mjs",
+    "dev": "npm run validate:env && next dev",
+    "build": "npm run validate:env && next build",
+    "start": "npm run validate:env && next start",
+    "test:node": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "next": "15.3.1",

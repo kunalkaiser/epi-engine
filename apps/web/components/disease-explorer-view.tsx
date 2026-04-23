@@ -133,7 +133,13 @@ function renderIncidenceChart(state: ApiState<IncidenceResponse>, onRetry: () =>
     return <DataState status="error" title="Incidence request failed" detail={state.error} onRetry={onRetry} />;
   }
   if (state.status === "empty" || !state.data) {
-    return <DataState status="empty" title="No incidence results" detail="Try broadening the region or year filters." />;
+    return (
+      <DataState
+        status="empty"
+        title="No data available yet"
+        detail="Connected to the API, but there are no incidence rows for the selected filters."
+      />
+    );
   }
 
   return (
@@ -157,7 +163,13 @@ function renderPrevalenceChart(state: ApiState<PrevalenceResponse>, onRetry: () 
     return <DataState status="error" title="Prevalence request failed" detail={state.error} onRetry={onRetry} />;
   }
   if (state.status === "empty" || !state.data) {
-    return <DataState status="empty" title="No prevalence results" detail="Try broadening the region or year filters." />;
+    return (
+      <DataState
+        status="empty"
+        title="No data available yet"
+        detail="Connected to the API, but there are no prevalence rows for the selected filters."
+      />
+    );
   }
 
   return (

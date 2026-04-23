@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { fetchHealth, getEffectiveClientRole, type AppRole } from "../lib/api";
+import { fetchAuthMe, fetchDataQuality, fetchDebugSnapshot } from "../lib/api";
+import type { AppRole } from "../lib/types";
 
 type AppShellProps = {
   title: string;
@@ -12,100 +13,167 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-const ALL_ROLES: AppRole[] = [
+type AppContextState = {
+  role: AppRole | "unknown";
+  tenantId: string;
+  backendStatus: "ok" | "degraded" | "error";
+  backendDetail: string;
+  dqStatus: "ok" | "degraded";
+};
+
+const ALL_ROLES: Array<AppRole | "unknown"> = [
   "admin",
   "analyst",
+  "read_only",
+  "auditor",
+  "operations",
+  "payer_aggregate_only",
+  "trial_coordinator",
+  "read_only_gov",
+  "unknown",
+];
+
+const ANALYST_ROLES: Array<AppRole | "unknown"> = [
+  "admin",
+  "analyst",
+  "read_only",
+  "auditor",
+  "operations",
   "payer_aggregate_only",
   "trial_coordinator",
   "read_only_gov",
 ];
-const RANKING_ROLES: AppRole[] = ["admin", "analyst", "trial_coordinator"];
-const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", roles: ALL_ROLES },
-  { href: "/disease-explorer", label: "Disease Explorer", roles: ALL_ROLES },
-  { href: "/indication-prioritizer", label: "Indication Prioritizer", roles: RANKING_ROLES },
-];
 
-type HealthStatus = {
-  state: "checking" | "ok" | "degraded";
-  detail: string;
-};
+const DECISION_ROLES: Array<AppRole | "unknown"> = ["admin", "analyst", "operations", "trial_coordinator", "auditor"];
+
+const ADMIN_ROLES: Array<AppRole | "unknown"> = ["admin", "operations", "auditor"];
+
+const NAV_ITEMS: Array<{ href: string; label: string; roles: Array<AppRole | "unknown"> }> = [
+  { href: "/", label: "Command Center", roles: ALL_ROLES },
+  { href: "/disease-explorer", label: "Disease Explorer", roles: ANALYST_ROLES },
+  { href: "/incidence-prevalence", label: "Incidence & Prevalence", roles: ANALYST_ROLES },
+  { href: "/determinants-analysis", label: "Determinants", roles: ANALYST_ROLES },
+  { href: "/indication-prioritizer", label: "Indication Prioritizer", roles: DECISION_ROLES },
+  { href: "/simulation-lab", label: "Simulation Lab", roles: DECISION_ROLES },
+  { href: "/compare-scenarios", label: "Compare Scenarios", roles: DECISION_ROLES },
+  { href: "/data-quality-center", label: "Data Quality", roles: ANALYST_ROLES },
+  { href: "/ingestion-run-center", label: "Ingestion Runs", roles: ADMIN_ROLES },
+  { href: "/audit-viewer", label: "Audit Activity", roles: ADMIN_ROLES },
+  { href: "/methodology-center", label: "Methodology", roles: ALL_ROLES },
+  { href: "/health-diagnostics", label: "Health & Runtime", roles: ALL_ROLES },
+  { href: "/admin-tenant-settings", label: "Admin & Tenant", roles: ADMIN_ROLES },
+];
 
 export function AppShell({ title, description, children }: AppShellProps) {
   const pathname = usePathname();
-  const role = getEffectiveClientRole();
-  const [health, setHealth] = useState<HealthStatus>({
-    state: "checking",
-    detail: "Checking API connectivity",
+  const [context, setContext] = useState<AppContextState>({
+    role: "unknown",
+    tenantId: "unknown",
+    backendStatus: "error",
+    backendDetail: "Checking backend",
+    dqStatus: "ok",
   });
 
   useEffect(() => {
     let mounted = true;
-
-    async function checkHealth() {
+    async function loadContext() {
       try {
-        const response = await fetchHealth();
-        if (!mounted) {
-          return;
-        }
-        setHealth({
-          state: response.status === "ok" ? "ok" : "degraded",
-          detail: response.status === "ok" ? `API healthy (${response.environment})` : "API responded with degraded status",
+        const [debug, auth, dq] = await Promise.all([
+          fetchDebugSnapshot(),
+          fetchAuthMe(),
+          fetchDataQuality({ page: 1, pageSize: 5 }),
+        ]);
+        if (!mounted) return;
+        setContext({
+          role: auth.role ?? "unknown",
+          tenantId: auth.tenantId ?? "unknown",
+          backendStatus: debug.backend.status === "ok" ? "ok" : "degraded",
+          backendDetail: debug.backend.detail,
+          dqStatus: dq.status,
         });
-      } catch {
-        if (!mounted) {
-          return;
-        }
-        setHealth({
-          state: "degraded",
-          detail: "API unavailable. Live endpoint data may fail.",
-        });
+      } catch (error) {
+        if (!mounted) return;
+        setContext((previous) => ({
+          ...previous,
+          backendStatus: "error",
+          backendDetail: error instanceof Error ? error.message : "Backend unavailable",
+        }));
       }
     }
 
-    void checkHealth();
-    const intervalId = globalThis.setInterval(() => {
-      void checkHealth();
-    }, 30000);
-
+    void loadContext();
+    const intervalId = setInterval(() => {
+      void loadContext();
+    }, 20000);
     return () => {
       mounted = false;
-      globalThis.clearInterval(intervalId);
+      clearInterval(intervalId);
     };
   }, []);
 
-  return (
-    <div className="app-shell">
-      <header className="app-topbar">
-        <div className="brand">
-          <span className="brand-kicker">Healthcare Epidemiology</span>
-          <h1 className="brand-title">{title}</h1>
-          <p className="brand-copy">{description}</p>
-        </div>
-        <nav className="nav-tabs" aria-label="Primary">
-          {NAV_ITEMS.map((item) => {
-            const isActive = pathname === item.href;
-            const isAllowed = role !== "unknown" && item.roles.includes(role);
+  const breadcrumbs = useMemo(() => {
+    const parts = pathname.split("/").filter(Boolean);
+    if (parts.length === 0) return ["Command Center"];
+    return parts.map((part) => part.replace(/-/g, " ").replace(/\b\w/g, (token) => token.toUpperCase()));
+  }, [pathname]);
 
-            if (!isAllowed) {
+  return (
+    <div className="os-shell">
+      <aside className="os-nav">
+        <div className="os-brand">
+          <span className="os-brand-kicker">EpiOS</span>
+          <h1 className="os-brand-title">Enterprise Intelligence OS</h1>
+          <p className="os-brand-copy">Aggregate-first epidemiology and strategy operations.</p>
+        </div>
+        <nav className="os-nav-links" aria-label="Platform modules">
+          {NAV_ITEMS.map((item) => {
+            const enabled = item.roles.includes(context.role);
+            const active = pathname === item.href;
+            if (!enabled) {
               return (
-                <span key={item.href} className="nav-tab nav-tab-disabled" aria-disabled="true">
+                <span key={item.href} className="os-nav-link os-nav-link-disabled" aria-disabled="true">
                   {item.label}
                 </span>
               );
             }
-
-            return <Link key={item.href} href={item.href} className={`nav-tab${isActive ? " nav-tab-active" : ""}`}>{item.label}</Link>;
+            return (
+              <Link key={item.href} href={item.href} className={`os-nav-link${active ? " os-nav-link-active" : ""}`}>
+                {item.label}
+              </Link>
+            );
           })}
         </nav>
-      </header>
-      <section className={`status-banner status-banner-${health.state}`}>
-        <span className="status-dot" aria-hidden="true" />
-        <strong>Backend</strong>
-        <span>{health.detail}</span>
-        <span className="status-pill">Role: {role}</span>
-      </section>
-      {children}
+      </aside>
+      <div className="os-main">
+        <header className="os-header">
+          <div>
+            <div className="os-breadcrumbs">{breadcrumbs.join(" / ")}</div>
+            <h2 className="os-page-title">{title}</h2>
+            <p className="os-page-copy">{description}</p>
+          </div>
+          <div className="os-context-grid">
+            <ContextBadge label="Tenant" value={context.tenantId} tone="neutral" />
+            <ContextBadge label="Role" value={context.role} tone="neutral" />
+            <ContextBadge label="Backend" value={context.backendStatus} tone={context.backendStatus === "ok" ? "ok" : "warn"} />
+            <ContextBadge label="Data Quality" value={context.dqStatus} tone={context.dqStatus === "ok" ? "ok" : "warn"} />
+          </div>
+        </header>
+        <section className={`os-status-banner os-status-${context.backendStatus === "ok" ? "ok" : "warn"}`}>
+          <strong>Runtime</strong>
+          <span>{context.backendDetail}</span>
+        </section>
+        <main className="os-content">{children}</main>
+      </div>
     </div>
   );
 }
+
+function ContextBadge({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" | "neutral" }) {
+  return (
+    <div className={`os-context-badge os-context-${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+

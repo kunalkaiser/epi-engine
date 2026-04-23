@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchTopIndications, getEffectiveClientRole, isEmptyResponse, type ApiState } from "../lib/api";
-import type { TopIndicationsResponse } from "../lib/types";
+import { fetchIndicationDecisionMemo, fetchTopIndications, isEmptyResponse, type ApiState } from "../lib/api";
+import type { DecisionMemoResponse, TopIndicationsResponse } from "../lib/types";
 import { AppShell } from "./app-shell";
 import { ChartBars } from "./chart-bars";
 import { DataState } from "./data-state";
@@ -11,8 +11,6 @@ import { DataState } from "./data-state";
 const REGION_OPTIONS = ["", "US", "CA"];
 
 export function IndicationPrioritizerView() {
-  const role = getEffectiveClientRole();
-  const canAccessPrioritizer = role === "admin" || role === "analyst" || role === "trial_coordinator";
   const [reloadKey, setReloadKey] = useState(0);
   const [region, setRegion] = useState("US");
   const [limit, setLimit] = useState("3");
@@ -22,35 +20,45 @@ export function IndicationPrioritizerView() {
     data: null,
     error: null,
   });
+  const [memoState, setMemoState] = useState<ApiState<DecisionMemoResponse>>({
+    status: "loading",
+    data: null,
+    error: null,
+  });
 
   useEffect(() => {
-    if (!canAccessPrioritizer) {
-      return;
-    }
-
     async function loadRankings() {
       setState({ status: "loading", data: null, error: null });
+      setMemoState({ status: "loading", data: null, error: null });
       try {
-        const response = await fetchTopIndications({
-          region: region || undefined,
-          limit: Number(limit),
-          page: 1,
-          pageSize: Number(pageSize),
-        });
+        const [response, memo] = await Promise.all([
+          fetchTopIndications({
+            region: region || undefined,
+            limit: Number(limit),
+            page: 1,
+            pageSize: Number(pageSize),
+          }),
+          fetchIndicationDecisionMemo({
+            region: region || undefined,
+            limit: Number(limit),
+          }),
+        ]);
 
         setState({
           status: isEmptyResponse(response) ? "empty" : "success",
           data: response,
           error: null,
         });
+        setMemoState({ status: "success", data: memo, error: null });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown API error";
         setState({ status: "error", data: null, error: message });
+        setMemoState({ status: "error", data: null, error: message });
       }
     }
 
     void loadRankings();
-  }, [region, limit, pageSize, reloadKey, canAccessPrioritizer]);
+  }, [region, limit, pageSize, reloadKey]);
 
   const retry = () => {
     setReloadKey((value) => value + 1);
@@ -62,58 +70,51 @@ export function IndicationPrioritizerView() {
       description="Rank candidate indications using the API scoring feed, with transparent component scores and lightweight visual comparison."
     >
       <main className="page-grid">
-        {!canAccessPrioritizer ? (
-          <DataState
-            status="error"
-            title="Indication prioritization is restricted"
-            detail={`Role ${role} cannot access ranking endpoints. Aggregate trend views remain available.`}
-          />
-        ) : null}
-        {canAccessPrioritizer ? (
-          <>
-            <section className="panel">
-              <div className="section-heading">
-                <div>
-                  <h2 className="section-title">Filters</h2>
-                  <p className="section-copy">Tune the ranking slice by region and result count.</p>
-                </div>
-              </div>
-              <div className="filter-row">
-                <div className="field">
-                  <label htmlFor="region">Region suffix</label>
-                  <select id="region" value={region} onChange={(event) => setRegion(event.target.value)}>
-                    {REGION_OPTIONS.map((option) => (
-                      <option key={option || "all"} value={option}>
-                        {option || "All suffixes"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label htmlFor="limit">Top limit</label>
-                  <input id="limit" type="number" value={limit} onChange={(event) => setLimit(event.target.value)} />
-                </div>
-                <div className="field">
-                  <label htmlFor="page-size">Page size</label>
-                  <input
-                    id="page-size"
-                    type="number"
-                    value={pageSize}
-                    onChange={(event) => setPageSize(event.target.value)}
-                  />
-                </div>
-              </div>
-            </section>
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2 className="section-title">Filters</h2>
+              <p className="section-copy">Tune the ranking slice by region and result count.</p>
+            </div>
+          </div>
+          <div className="filter-row">
+            <div className="field">
+              <label htmlFor="region">Region suffix</label>
+              <select id="region" value={region} onChange={(event) => setRegion(event.target.value)}>
+                {REGION_OPTIONS.map((option) => (
+                  <option key={option || "all"} value={option}>
+                    {option || "All suffixes"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="limit">Top limit</label>
+              <input id="limit" type="number" value={limit} onChange={(event) => setLimit(event.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="page-size">Page size</label>
+              <input
+                id="page-size"
+                type="number"
+                value={pageSize}
+                onChange={(event) => setPageSize(event.target.value)}
+              />
+            </div>
+          </div>
+        </section>
 
-            {renderPrioritizerBody(state, retry)}
-          </>
-        ) : null}
+        {renderPrioritizerBody(state, memoState, retry)}
       </main>
     </AppShell>
   );
 }
 
-function renderPrioritizerBody(state: ApiState<TopIndicationsResponse>, onRetry: () => void) {
+function renderPrioritizerBody(
+  state: ApiState<TopIndicationsResponse>,
+  memoState: ApiState<DecisionMemoResponse>,
+  onRetry: () => void,
+) {
   if (state.status === "loading") {
     return <DataState status="loading" title="Loading rankings" detail="Fetching top indications from the API." />;
   }
@@ -158,6 +159,34 @@ function renderPrioritizerBody(state: ApiState<TopIndicationsResponse>, onRetry:
           </div>
         </section>
       </section>
+      {state.data.scoringProfile || state.data.methodology || memoState.status === "success" ? (
+        <section className="panel">
+          <div className="section-heading">
+            <div>
+              <h2 className="section-title">Trust and Methodology</h2>
+              <p className="section-copy">Weights, classification, and caveats are surfaced with each ranking slice.</p>
+            </div>
+          </div>
+          <div className="hero-points">
+            <div className="hero-point">
+              <strong>Scoring Profile</strong>
+              <span className="muted">{formatRecord(state.data.scoringProfile)}</span>
+            </div>
+            <div className="hero-point">
+              <strong>Methodology</strong>
+              <span className="muted">{formatRecord(state.data.methodology)}</span>
+            </div>
+            <div className="hero-point">
+              <strong>Decision Memo</strong>
+              <span className="muted">
+                {memoState.status === "success" && memoState.data
+                  ? `${memoState.data.summary} Classification: ${memoState.data.resultClassification}.`
+                  : "Decision memo unavailable for current slice."}
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="table-panel">
         <div className="section-heading">
@@ -196,4 +225,14 @@ function renderPrioritizerBody(state: ApiState<TopIndicationsResponse>, onRetry:
       </section>
     </>
   );
+}
+
+function formatRecord(value: Record<string, unknown> | null | undefined): string {
+  if (!value) {
+    return "n/a";
+  }
+  const entries = Object.entries(value)
+    .slice(0, 4)
+    .map(([key, raw]) => `${key}: ${Array.isArray(raw) ? raw.join(", ") : String(raw)}`);
+  return entries.join(" | ");
 }
