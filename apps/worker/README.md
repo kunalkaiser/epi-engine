@@ -2,6 +2,32 @@
 
 This directory contains reusable worker-side pipelines for aggregate-safe processing.
 
+## Runtime Worker Loop
+
+The container/runtime entrypoint is `python -m apps.worker.worker`. It executes a periodic scheduling tick for ingestion refresh, score recompute, and data-quality checks.
+It also processes queued simulation runs asynchronously.
+
+Environment variables:
+
+- `WORKER_LOOP_INTERVAL_SECONDS` (default `60`)
+- `WORKER_RUN_ONCE` (default `false`, useful for smoke tests)
+- `WORKER_SIMULATION_BATCH_SIZE` (default `5`)
+
+## Ingestion Source Kinds and Environment Policy
+
+Runtime ingestion contract:
+
+- `apps.worker.ingestion.ingest_file(...)` accepts only registered source kinds.
+- Allowed kinds are defined by `apps.worker.source_adapters.supported_source_kinds()`.
+- Unsupported values fail with a deterministic error:
+  - `unsupported source_kind: <value>`
+
+Policy contract by environment:
+
+- Development/test may use `synthetic` fixtures for local iteration.
+- Staging/production should use enterprise adapter kinds (`ehr_aggregate`, `claims_aggregate`, `registry_aggregate`, `genomic_summary`, `benchmark_reference`, `literature_metadata`) with operator-managed connectors.
+- Adapter boundaries are real and stable in code; external connector credentials and transport remain operator-managed outside repo code.
+
 ## Clustering
 
 The clustering pipeline accepts only `synthetic` or `deidentified` inputs and produces cluster summaries plus evaluation metrics.

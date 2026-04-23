@@ -14,6 +14,7 @@ def test_settings_use_defaults(monkeypatch) -> None:
     monkeypatch.delenv("AUTH_JWT_SECRET", raising=False)
     monkeypatch.delenv("AUTH_JWT_ISSUER", raising=False)
     monkeypatch.delenv("AUTH_JWT_AUDIENCE", raising=False)
+    monkeypatch.delenv("REQUIRE_TENANT_CLAIM_NON_DEV", raising=False)
 
     settings = get_settings()
 
@@ -31,6 +32,11 @@ def test_settings_use_defaults(monkeypatch) -> None:
     assert settings.auth_jwt_secret == ""
     assert settings.auth_jwt_issuer == "epi-engine"
     assert settings.auth_jwt_audience == "epi-engine-clients"
+    assert settings.require_tenant_claim_non_dev is True
+    assert settings.metrics_enabled is True
+    assert settings.trace_header_name == "X-Request-ID"
+    assert settings.pilot_mode_enabled is False
+    assert settings.pilot_mode_label == "off"
 
 
 def test_settings_parse_env(monkeypatch) -> None:
@@ -48,6 +54,7 @@ def test_settings_parse_env(monkeypatch) -> None:
     monkeypatch.setenv("AUTH_JWT_SECRET", "jwt-secret")
     monkeypatch.setenv("AUTH_JWT_ISSUER", "issuer")
     monkeypatch.setenv("AUTH_JWT_AUDIENCE", "audience")
+    monkeypatch.setenv("REQUIRE_TENANT_CLAIM_NON_DEV", "false")
     clear_settings_cache()
 
     settings = get_settings()
@@ -66,3 +73,25 @@ def test_settings_parse_env(monkeypatch) -> None:
     assert settings.auth_jwt_secret == "jwt-secret"
     assert settings.auth_jwt_issuer == "issuer"
     assert settings.auth_jwt_audience == "audience"
+    assert settings.require_tenant_claim_non_dev is False
+    assert settings.metrics_enabled is True
+    assert settings.trace_header_name == "X-Request-ID"
+    assert settings.pilot_mode_enabled is False
+    assert settings.pilot_mode_label == "off"
+
+
+def test_settings_fail_fast_for_non_dev_unsafe_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "dev-secret")
+    monkeypatch.setenv("CLICKHOUSE_USER", "default")
+    monkeypatch.setenv("CLICKHOUSE_PASSWORD", "")
+    monkeypatch.setenv("CLICKHOUSE_URL", "http://localhost:8123")
+    monkeypatch.setenv("API_CORS_ORIGINS", "http://localhost:3000")
+    monkeypatch.setenv("DB_FALLBACK_ENABLED", "true")
+    clear_settings_cache()
+
+    try:
+        get_settings()
+        assert False, "expected ValueError for unsafe production settings"
+    except ValueError as exc:
+        assert "staging/production" in str(exc)

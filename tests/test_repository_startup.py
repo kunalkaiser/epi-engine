@@ -14,7 +14,12 @@ def setup_function() -> None:
 
 def test_build_repository_uses_clickhouse_in_non_development(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("DB_FALLBACK_ENABLED", "true")
+    monkeypatch.setenv("DB_FALLBACK_ENABLED", "false")
+    monkeypatch.setenv("AUTH_JWT_SECRET", "prod-secret")
+    monkeypatch.setenv("CLICKHOUSE_USER", "epi_engine_app")
+    monkeypatch.setenv("CLICKHOUSE_PASSWORD", "prod-password")
+    monkeypatch.setenv("CLICKHOUSE_URL", "http://clickhouse:8123")
+    monkeypatch.setenv("API_CORS_ORIGINS", "https://epios.example.com")
     clear_settings_cache()
 
     repository = build_analytics_repository()

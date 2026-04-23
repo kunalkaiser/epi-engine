@@ -84,6 +84,34 @@ def test_clickhouse_repository_maps_ranked_profile_rows() -> None:
     assert result.items[0].indication_id == "t2d-us"
 
 
+def test_clickhouse_repository_maps_mortality_rows() -> None:
+    client = FakeClickHouseClient(
+        [
+            [{"total_items": 1}],
+            [
+                {
+                    "disease_id": "t2d",
+                    "disease_name": "Type 2 diabetes",
+                    "region_code": "US",
+                    "year": 2025,
+                    "deaths": 27720,
+                    "population": 334900000,
+                    "mortality_per_100k": 8.3,
+                }
+            ],
+        ]
+    )
+    repository = ClickHouseAnalyticsRepository(client)  # type: ignore[arg-type]
+
+    result = repository.list_mortality(
+        RegionTimeFilters(region="US", year_from=2025, year_to=2025, page=1, page_size=10)
+    )
+
+    assert result.pagination.total_items == 1
+    assert result.items[0].deaths == 27720
+    assert "FROM mortality_facts" in client.calls[0][0]
+
+
 def test_ranked_service_works_with_synthetic_repository_adapter() -> None:
     repository = SyntheticAnalyticsRepository()
 
@@ -135,3 +163,12 @@ def test_ranked_service_uses_clickhouse_rows_when_repository_provided() -> None:
 
     assert response.pagination.total_items == 1
     assert response.items[0].indication_id == "rare-us"
+
+
+def test_synthetic_repository_derives_mortality_for_dev_fallback() -> None:
+    repository = SyntheticAnalyticsRepository()
+
+    result = repository.list_mortality(RegionTimeFilters(region="US", page=1, page_size=5))
+
+    assert result.pagination.total_items >= 1
+    assert result.items[0].deaths >= 0
