@@ -16,15 +16,18 @@ services:
 
   web:
     environment:
+      API_BASE_URL: ${API_BASE_URL:?set API_BASE_URL}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?set API_AUTH_TOKEN}
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?set NEXT_PUBLIC_API_BASE_URL}
-      NEXT_PUBLIC_API_AUTH_TOKEN: ${NEXT_PUBLIC_API_AUTH_TOKEN:?set NEXT_PUBLIC_API_AUTH_TOKEN}
     restart: unless-stopped
 
   worker:
     environment:
       APP_ENV: staging
       CLICKHOUSE_URL: http://clickhouse:8123
-    command: ["python", "-c", "import time; print('worker ready (staging)'); time.sleep(10**9)"]
+      WORKER_LOOP_INTERVAL_SECONDS: ${WORKER_LOOP_INTERVAL_SECONDS:-120}
+      WORKER_SIMULATION_BATCH_SIZE: ${WORKER_SIMULATION_BATCH_SIZE:-10}
+      WORKER_HEARTBEAT_FILE: /tmp/epios-worker-heartbeat
     restart: unless-stopped
 
   clickhouse:
@@ -34,6 +37,18 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD}
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    depends_on:
+      - web
+      - api
+    volumes:
+      - ./infra/docker/cloudflared/config.staging.example.yml:/etc/cloudflared/config.yml:ro
+      - ${CLOUDFLARE_TUNNEL_CREDENTIALS_FILE:?set CLOUDFLARE_TUNNEL_CREDENTIALS_FILE}:/etc/cloudflared/tunnel-credentials.json:ro
     restart: unless-stopped
 
 volumes:

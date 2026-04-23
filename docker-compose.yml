@@ -15,18 +15,35 @@ services:
       AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-epi-engine-clients}
     ports:
       - "8000:8000"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib import request; request.urlopen('http://localhost:8000/health', timeout=3).read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   web:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
+      API_BASE_URL: http://api:8000
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY}
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-      NEXT_PUBLIC_API_AUTH_TOKEN: ${NEXT_PUBLIC_API_AUTH_TOKEN:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   clickhouse:
     image: clickhouse/clickhouse-server
@@ -37,6 +54,12 @@ services:
     ports:
       - "8123:8123"
       - "9000:9000"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
 
   worker:
     build:
@@ -45,6 +68,15 @@ services:
     environment:
       APP_ENV: development
       CLICKHOUSE_URL: http://clickhouse:8123
+      WORKER_LOOP_INTERVAL_SECONDS: ${WORKER_LOOP_INTERVAL_SECONDS:-60}
+      WORKER_SIMULATION_BATCH_SIZE: ${WORKER_SIMULATION_BATCH_SIZE:-5}
+      WORKER_HEARTBEAT_FILE: /tmp/epios-worker-heartbeat
     depends_on:
-      - clickhouse
-    command: ["python", "-c", "import time; print('worker ready (development)'); time.sleep(10**9)"]
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import time; p=Path('/tmp/epios-worker-heartbeat'); raise SystemExit(0 if p.exists() and (time.time()-p.stat().st_mtime)<300 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
