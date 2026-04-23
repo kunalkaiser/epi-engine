@@ -25,14 +25,16 @@ In a separate shell:
 cd apps/web
 npm ci
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 \
-NEXT_PUBLIC_API_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY \
+API_BASE_URL=http://localhost:8000 \
+API_AUTH_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY \
 npm run dev
 ```
 
 The web app will be available at `http://localhost:3000`.
 
 Notes:
-- `NEXT_PUBLIC_API_AUTH_TOKEN` must be a bearer token signed with the API JWT settings.
+- `API_AUTH_TOKEN` must be a bearer token signed with the API JWT settings.
+- `API_BASE_URL` is the backend URL used by the server-side Next.js proxy routes.
 - `docker compose up --build` provides a default dev analyst token so the browser flows work from a clean checkout.
 - The token above is a local development token only and matches the compose defaults.
 
@@ -42,6 +44,13 @@ From the repo root:
 
 ```bash
 python3 -m pytest tests
+```
+
+Frontend env/security smoke tests:
+
+```bash
+cd apps/web
+npm run test:node
 ```
 
 ## Docker Compose
@@ -56,7 +65,7 @@ Services:
 - API: `http://localhost:8000`
 - Web: `http://localhost:3000`
 - ClickHouse: `http://localhost:8123`
-- Worker: background worker container (development stub process for compose boot verification)
+- Worker: background worker container running `apps.worker.worker` scheduling loop
 
 ## Staging Deployment Path
 
@@ -79,11 +88,18 @@ Then apply ClickHouse schema files:
 ```bash
 docker exec -i $(docker ps -qf name=clickhouse) clickhouse-client < infra/sql/001_init_schema.sql
 docker exec -i $(docker ps -qf name=clickhouse) clickhouse-client < infra/sql/002_staging_tables.sql
+docker exec -i $(docker ps -qf name=clickhouse) clickhouse-client < infra/sql/004_enterprise_aggregate_extensions.sql
 ```
 
 Full checklist: `docs/architecture/staging-deployment.md`.
 
 Cloudflare private staging access guidance (Tunnel + Access policies): `docs/architecture/staging-deployment.md`.
+Post-push staging/access pass (from GitHub `main` to staging host): `docs/architecture/staging-deployment.md`.
+Manual staging operator runbook: `docs/architecture/staging-runbook.md`.
+Staging deploy workflow: `.github/workflows/staging.yml` (protected `staging` environment gate; manual deploy remains fallback).
+GitHub `staging` environment must enforce required reviewers and prevent self-review (see deployment docs).
+Go-live checklist and enforcement boundary: `docs/architecture/staging-deployment.md`.
+Cloudflare frontend hostname: `https://staging.epi-engine.example` (Access-protected by default).
 
 Staging-only behavior:
 - `DB_FALLBACK_ENABLED=false` is enforced in `docker-compose.staging.yml` so synthetic API fallback is disabled.
@@ -117,3 +133,12 @@ git push -u origin main
 - ClickHouse SQL schema
 - ingestion, scoring, and clustering worker modules
 - synthetic/de-identified dev data only
+
+Architecture status and phase plan: `docs/architecture/epios-gap-analysis.md`.
+Phase 2 backend hardening details: `docs/architecture/epios-backend-phase2.md`.
+Phase 3 intelligence hardening details: `docs/architecture/epios-intelligence-phase3.md`.
+Phase 4 frontend OS layer details: `docs/architecture/epios-frontend-phase4.md`.
+Phase 5 production hardening details: `docs/architecture/epios-phase5-production-hardening.md`.
+Phase 6 scientific and pilot readiness details: `docs/architecture/epios-phase6-scientific-pilot-readiness.md`.
+
+Post-deploy verification helper: `infra/compose/post_deploy_verify.sh`.
