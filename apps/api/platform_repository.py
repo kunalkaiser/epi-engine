@@ -330,7 +330,7 @@ class PlatformPersistenceRepository:
             SELECT
                 run_id,
                 tenant_id,
-                argMax(status, updated_at) AS status,
+                anyLast(status) AS status,
                 anyLast(scenario_type) AS scenario_type,
                 anyLast(region_code) AS region_code,
                 anyLast(created_by) AS created_by,
@@ -510,7 +510,7 @@ class PlatformPersistenceRepository:
                 anyLast(dataset_name) AS dataset_name,
                 anyLast(source_system) AS source_system,
                 anyLast(trigger_source) AS trigger_source,
-                argMax(status, updated_at) AS status,
+                anyLast(status) AS status,
                 anyLast(records_processed) AS records_processed,
                 anyLast(records_inserted) AS records_inserted,
                 anyLast(records_updated) AS records_updated,
