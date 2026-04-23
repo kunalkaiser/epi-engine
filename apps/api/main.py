@@ -180,7 +180,7 @@ async def request_logging_middleware(request: Request, call_next):
 async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     log_event(logger, logging.WARNING, "request.validation_error", errors=len(exc.errors()))
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
             "error": {
                 "code": "validation_error",
