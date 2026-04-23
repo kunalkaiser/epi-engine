@@ -7,23 +7,43 @@ import json
 import time
 from typing import Any, Callable, Literal
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from apps.api.audit import audit_log_access
 from apps.api.settings import get_settings
 
 
-Role = Literal["admin", "analyst", "payer_aggregate_only", "trial_coordinator", "read_only_gov"]
+Role = Literal[
+    "admin",
+    "analyst",
+    "read_only",
+    "auditor",
+    "operations",
+    "payer_aggregate_only",
+    "trial_coordinator",
+    "read_only_gov",
+]
 _ROLE_ADAPTER = TypeAdapter(Role)
 
 
 class AuthClaims(BaseModel):
     sub: str
     role: str
+    tenant_id: str | None = None
+    tid: str | None = None
     iss: str | None = None
     aud: str | None = None
     exp: int | None = None
+
+
+class RequestContext(BaseModel):
+    subject: str
+    role: Role
+    tenant_id: str
+    correlation_id: str | None = None
+    issuer: str | None = None
+    audience: str | None = None
 
 
 def require_role(resource: str, allowed_roles: set[Role]) -> Callable[[str | None], Role]:
@@ -49,6 +69,46 @@ def require_role(resource: str, allowed_roles: set[Role]) -> Callable[[str | Non
             subject=claims.sub,
         )
         return claims.role
+
+    return dependency
+
+
+def require_request_context(resource: str, allowed_roles: set[Role]) -> Callable[[Request], RequestContext]:
+    def dependency(
+        request: Request,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+        tenant_override: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> RequestContext:
+        claims = _authenticate_claims(resource=resource, authorization=authorization)
+        if claims.role not in allowed_roles:
+            detail = f"role {claims.role} is not allowed to access {resource}"
+            audit_log_access(
+                "access.denied",
+                role=claims.role,
+                resource=resource,
+                outcome="denied",
+                detail=detail,
+                subject=claims.sub,
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+        tenant_id = _resolve_tenant_id(claims, tenant_override=tenant_override, resource=resource)
+
+        audit_log_access(
+            "access.allowed",
+            role=claims.role,
+            resource=resource,
+            outcome="allowed",
+            subject=claims.sub,
+        )
+        return RequestContext(
+            subject=claims.sub,
+            role=claims.role,
+            tenant_id=tenant_id,
+            correlation_id=getattr(request.state, "correlation_id", None),
+            issuer=claims.iss,
+            audience=claims.aud,
+        )
 
     return dependency
 
@@ -89,6 +149,8 @@ def _authenticate_claims(resource: str, authorization: str | None) -> AuthClaims
     return AuthClaims(
         sub=claims.sub,
         role=role,
+        tenant_id=claims.tenant_id,
+        tid=claims.tid,
         iss=claims.iss,
         aud=claims.aud,
         exp=claims.exp,
@@ -169,3 +231,22 @@ def _raise_unauthorized(resource: str, detail: str) -> Any:
         detail=detail,
     )
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+
+def _resolve_tenant_id(claims: AuthClaims, tenant_override: str | None, resource: str) -> str:
+    settings = get_settings()
+    token_tenant = (claims.tenant_id or claims.tid or "").strip()
+    if not token_tenant:
+        if settings.app_env != "development" and settings.require_tenant_claim_non_dev:
+            _raise_unauthorized(resource, "tenant_id is required in bearer token claims")
+        token_tenant = "dev-tenant"
+
+    if tenant_override:
+        if claims.role not in {"admin", "operations"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="tenant override is only allowed for admin/operations roles",
+            )
+        return tenant_override.strip()
+
+    return token_tenant

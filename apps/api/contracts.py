@@ -189,6 +189,31 @@ class PrevalenceAggregate(ContractModel):
     )
 
 
+class MortalityAggregate(ContractModel):
+    disease_id: str = Field(min_length=1, max_length=64)
+    disease_name: str = Field(min_length=1, max_length=160)
+    region_code: str = Field(min_length=2, max_length=16, pattern=r"^[A-Z]{2}(-[A-Z0-9]{1,8})?$")
+    year: int = Field(ge=1900, le=2100)
+    deaths: int = Field(ge=0)
+    population: int = Field(gt=0)
+    mortality_per_100k: float = Field(ge=0)
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "disease_id": "t2d",
+                "disease_name": "Type 2 diabetes",
+                "region_code": "US",
+                "year": 2025,
+                "deaths": 27720,
+                "population": 334900000,
+                "mortality_per_100k": 8.3,
+            }
+        },
+    )
+
+
 class IndicationScore(ContractModel):
     indication_id: str = Field(min_length=1, max_length=64)
     indication_name: str = Field(min_length=1, max_length=160)
@@ -293,6 +318,12 @@ class FactorExplanation(ContractModel):
     weight: float = Field(ge=0, le=1)
     weighted_contribution: float = Field(ge=0, le=100)
     explanation: str = Field(min_length=1, max_length=280)
+    evidence_classification: Literal["descriptive", "associative", "causal_hypothesis", "scenario_projection"] = "associative"
+    caveat: str = Field(
+        default="Contribution is associative and intended for prioritization support.",
+        min_length=1,
+        max_length=280,
+    )
 
 
 class RankedIndication(ContractModel):
@@ -303,6 +334,22 @@ class RankedIndication(ContractModel):
     weights_used: ScoringWeights
     explanations: list[FactorExplanation] = Field(min_length=6, max_length=6)
     summary: str = Field(min_length=1, max_length=400)
+    scoring_profile_id: str = Field(default="default_v1", min_length=1, max_length=64)
+    scoring_profile_version: str = Field(default="1.0.0", min_length=1, max_length=32)
+    methodology_version: str = Field(default="score-v1.0", min_length=1, max_length=32)
+    confidence_label: Literal["low", "medium", "high"] = "medium"
+    result_classification: Literal["descriptive", "associative", "causal_hypothesis", "scenario_projection"] = "associative"
+    input_provenance_summary: str = Field(
+        default="Aggregate indication profile factors from tenant-scoped analytical store.",
+        min_length=1,
+        max_length=280,
+    )
+    data_limitations: list[str] = Field(
+        default_factory=lambda: [
+            "Scores are relative rankings over aggregate inputs, not prospective clinical outcomes."
+        ],
+        max_length=8,
+    )
 
     model_config = ConfigDict(
         str_strip_whitespace=True,

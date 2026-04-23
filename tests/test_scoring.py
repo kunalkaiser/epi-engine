@@ -39,3 +39,18 @@ def test_rank_indications_respects_weight_configuration() -> None:
 
     assert default_ranked[0].indication_id == "t2d-us"
     assert equity_heavy_ranked[0].indication_id == "ckd-us-ca"
+
+
+def test_ranked_indication_includes_transparency_metadata() -> None:
+    ranked = rank_indications(INDICATION_PROFILES, ScoringWeights(), scoring_profile_id="default_v1", methodology_version="score-v1.1")
+
+    assert ranked[0].scoring_profile_id == "default_v1"
+    assert ranked[0].methodology_version == "score-v1.1"
+    assert ranked[0].result_classification == "associative"
+    assert ranked[0].confidence_label in {"low", "medium", "high"}
+    assert ranked[0].explanations[0].evidence_classification in {
+        "descriptive",
+        "associative",
+        "causal_hypothesis",
+        "scenario_projection",
+    }

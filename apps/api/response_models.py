@@ -38,8 +38,13 @@ class PrevalenceResponse(BaseModel):
 class TopIndicationsResponse(BaseModel):
     items: list[IndicationScore]
     pagination: PaginationMeta
+    scoring_profile: dict | None = None
+    methodology: dict | None = None
 
 
 class RankedIndicationsResponse(BaseModel):
     items: list[RankedIndication]
     pagination: PaginationMeta
+    scoring_profile: dict | None = None
+    methodology: dict | None = None
+    caveats: list[str] = Field(default_factory=list)

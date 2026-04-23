@@ -6,3 +6,5 @@ COPY apps/worker/requirements.txt ./apps/worker/requirements.txt
 RUN pip install --no-cache-dir -r apps/worker/requirements.txt
 
 COPY apps ./apps
+
+CMD ["python", "-m", "apps.worker.worker"]

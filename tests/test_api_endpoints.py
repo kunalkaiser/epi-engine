@@ -1,12 +1,10 @@
-import base64
-import hashlib
-import hmac
-import json
 import os
 import time
 
 from fastapi.testclient import TestClient
 
+from auth_test_utils import auth_headers as shared_auth_headers
+from auth_test_utils import encode_token as shared_encode_token
 from apps.api.audit import clear_audit_events, get_audit_events
 from apps.api.main import app
 from apps.api.settings import clear_settings_cache
@@ -16,6 +14,7 @@ client = TestClient(app)
 
 
 def setup_function() -> None:
+    os.environ["APP_ENV"] = "development"
     os.environ["AUTH_JWT_SECRET"] = "dev-secret"
     os.environ["AUTH_JWT_ISSUER"] = "epi-engine"
     os.environ["AUTH_JWT_AUDIENCE"] = "epi-engine-clients"
@@ -83,6 +82,8 @@ def test_get_top_indications_supports_region_filter_and_pagination() -> None:
     }
     assert len(body["items"]) == 1
     assert body["items"][0]["indication_id"] == "t2d-us"
+    assert body["scoring_profile"]["profile_id"] == "default_v1"
+    assert body["methodology"]["result_classification"] == "associative"
 
 
 def test_indications_top_forbids_payer_aggregate_only() -> None:
@@ -136,6 +137,13 @@ def test_ranked_indications_returns_explanations_and_weights() -> None:
     assert len(body["items"][0]["explanations"]) == 6
     assert body["items"][0]["weights_used"]["incidence"] == 0.3
     assert body["items"][0]["explanations"][4]["factor"] == "competition_penalty"
+    assert body["items"][0]["result_classification"] == "associative"
+    assert body["items"][0]["explanations"][0]["evidence_classification"] in {
+        "descriptive",
+        "associative",
+        "causal_hypothesis",
+        "scenario_projection",
+    }
 
 
 def test_ranked_indications_forbids_read_only_gov() -> None:
@@ -217,29 +225,24 @@ def test_health_includes_environment() -> None:
     assert "environment" in response.json()
 
 
+def test_trace_header_is_propagated_on_response(monkeypatch) -> None:
+    monkeypatch.setenv("TRACE_HEADER_NAME", "X-Trace-ID")
+    clear_settings_cache()
+    response = client.get("/health", headers={"X-Trace-ID": "trace-123"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Trace-ID"] == "trace-123"
+    assert response.headers["X-Request-ID"] == "trace-123"
+
+
 def auth_headers(role: str | None = None, *, subject: str = "user-1", raw_role: str | None = None) -> dict[str, str]:
-    claims = {
-        "sub": subject,
-        "role": role if raw_role is None else raw_role,
-        "iss": "epi-engine",
-        "aud": "epi-engine-clients",
-        "exp": int(time.time()) + 3600,
-    }
-    return {"Authorization": f"Bearer {encode_token(claims)}"}
+    return shared_auth_headers(
+        role=role,
+        subject=subject,
+        raw_role=raw_role,
+        secret="dev-secret",
+    )
 
 
 def encode_token(payload: dict[str, object], *, secret: str = "dev-secret") -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    encoded_header = _urlsafe_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-    encoded_payload = _urlsafe_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signature = hmac.new(
-        secret.encode("utf-8"),
-        f"{encoded_header}.{encoded_payload}".encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    encoded_signature = _urlsafe_encode(signature)
-    return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
-
-
-def _urlsafe_encode(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+    return shared_encode_token(payload, secret=secret)

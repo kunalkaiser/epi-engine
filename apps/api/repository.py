@@ -5,7 +5,7 @@ import logging
 from math import ceil
 from typing import Protocol
 
-from apps.api.contracts import IncidenceAggregate, PrevalenceAggregate
+from apps.api.contracts import IncidenceAggregate, MortalityAggregate, PrevalenceAggregate
 from apps.api.data import INCIDENCE_DATA, INDICATION_PROFILES, PREVALENCE_DATA, IndicationProfile
 from apps.api.db import ClickHouseClient, ClickHouseConfig, ClickHouseUnavailableError
 from apps.api.logging_utils import get_logger, log_event
@@ -31,6 +31,9 @@ class AnalyticsRepository(Protocol):
         ...
 
     def list_prevalence(self, filters: RegionTimeFilters) -> PaginatedResult:
+        ...
+
+    def list_mortality(self, filters: RegionTimeFilters) -> PaginatedResult:
         ...
 
     def list_ranked_indication_profiles(self, filters: RankedIndicationsFilters) -> PaginatedResult:
@@ -170,6 +173,45 @@ class ClickHouseAnalyticsRepository:
         ]
         return PaginatedResult(items=items, pagination=_build_pagination(filters.page, filters.page_size, total_items))
 
+    def list_mortality(self, filters: RegionTimeFilters) -> PaginatedResult:
+        where_clause, query_params = _build_region_time_where(filters, "metric_year", "region_code")
+        count_rows = self.client.query_json(
+            f"SELECT count() AS total_items FROM mortality_facts {where_clause}",
+            query_params,
+        )
+        total_items = int(count_rows[0]["total_items"]) if count_rows else 0
+        offset = (filters.page - 1) * filters.page_size
+        rows = self.client.query_json(
+            f"""
+            SELECT
+                disease_id,
+                disease_name,
+                region_code,
+                metric_year AS year,
+                deaths,
+                population,
+                mortality_per_100k
+            FROM mortality_facts
+            {where_clause}
+            ORDER BY year DESC, disease_name DESC, region_code DESC
+            LIMIT {{limit:UInt64}} OFFSET {{offset:UInt64}}
+            """,
+            {**query_params, "limit": filters.page_size, "offset": offset},
+        )
+        items = [
+            MortalityAggregate(
+                disease_id=row["disease_id"],
+                disease_name=row["disease_name"],
+                region_code=row["region_code"],
+                year=int(row["year"]),
+                deaths=int(row["deaths"]),
+                population=int(row["population"]),
+                mortality_per_100k=float(row["mortality_per_100k"]),
+            )
+            for row in rows
+        ]
+        return PaginatedResult(items=items, pagination=_build_pagination(filters.page, filters.page_size, total_items))
+
     def list_ranked_indication_profiles(self, filters: RankedIndicationsFilters) -> PaginatedResult:
         where_parts: list[str] = []
         query_params: dict[str, object] = {}
@@ -266,6 +308,23 @@ class SyntheticAnalyticsRepository:
         filtered = sorted(filtered, key=lambda item: (item.year, item.disease_name, item.region_code), reverse=True)
         page_items, pagination = _paginate(filtered, filters.page, filters.page_size)
         return PaginatedResult(items=page_items, pagination=pagination)
+
+    def list_mortality(self, filters: RegionTimeFilters) -> PaginatedResult:
+        # Development-only aggregate fallback: derive mortality from incidence until mortality_facts is loaded.
+        incidence = self.list_incidence(filters)
+        items = [
+            MortalityAggregate(
+                disease_id=item.disease_id,
+                disease_name=item.disease_name,
+                region_code=item.region_code,
+                year=item.year,
+                deaths=max(int(item.incident_cases * 0.018), 0),
+                population=item.population,
+                mortality_per_100k=round(max((item.incident_cases * 0.018 / item.population) * 100000, 0), 4),
+            )
+            for item in incidence.items
+        ]
+        return PaginatedResult(items=items, pagination=incidence.pagination)
 
     def list_ranked_indication_profiles(self, filters: RankedIndicationsFilters) -> PaginatedResult:
         profiles = list(INDICATION_PROFILES)
