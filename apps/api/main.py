@@ -7,6 +7,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from apps.api.audit import audit_log, audit_log_export
 from apps.api.logging_utils import configure_logging, get_logger, log_event
@@ -125,7 +129,16 @@ DATA_QUALITY_ROLES: set[Role] = {
 ADMIN_DATA_ROLES: set[Role] = {"admin", "operations", "auditor"}
 REPORT_ROLES: set[Role] = {"admin", "analyst", "operations", "trial_coordinator", "auditor"}
 
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+# 200 req/min per IP globally; burst-sensitive endpoints get tighter limits via
+# @limiter.limit() decorator. Limits are per-IP — authenticated clients hitting
+# the same egress IP share a bucket (acceptable given JWT-auth enforcement).
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 app = FastAPI(title="EPI Engine API")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,6 +147,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.middleware("http")
@@ -288,7 +302,9 @@ def get_mortality(
 
 
 @app.get("/indications/top", response_model=TopIndicationsResponse)
+@limiter.limit("60/minute")
 def get_top_indications(
+    request: Request,
     filters: TopIndicationsFilters = Depends(top_indications_filters_dependency),
     _: Role = Depends(require_role("indications.top", INDICATION_ROLES)),
 ) -> TopIndicationsResponse:
@@ -297,7 +313,9 @@ def get_top_indications(
 
 
 @app.get("/indications/ranked", response_model=RankedIndicationsResponse)
+@limiter.limit("60/minute")
 def get_ranked_indications(
+    request: Request,
     filters: RankedIndicationsFilters = Depends(ranked_indications_filters_dependency),
     _: Role = Depends(require_role("indications.ranked", INDICATION_ROLES)),
 ) -> RankedIndicationsResponse:
