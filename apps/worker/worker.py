@@ -4,13 +4,21 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from apps.api.logging_utils import get_logger, log_event
 from apps.api.platform_services import process_queued_simulation_jobs
+from apps.worker.live_ingestion import run_live_ingestion
 
 
 logger = get_logger("epi_engine.worker.runtime")
+
+# Live ingestion runs at most once per this interval (env-configurable).
+_LIVE_INGESTION_INTERVAL_HOURS: float = float(
+    os.getenv("LIVE_INGESTION_INTERVAL_HOURS", "24")
+)
+_last_live_ingestion: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -62,14 +70,43 @@ def execute_scheduled_jobs(*, settings: WorkerSettings | None = None) -> None:
     except Exception as exc:  # pragma: no cover - defensive runtime guard
         log_event(logger, logging.ERROR, "worker.simulation_queue_failed", error_type=type(exc).__name__)
         processed_runs = 0
+
+    _run_live_ingestion_if_due()
+
     log_event(
         logger,
         logging.INFO,
         "worker.job_tick",
-        jobs=["ingestion_refresh", "score_recompute", "dq_checks", "simulation_queue"],
+        jobs=["ingestion_refresh", "score_recompute", "dq_checks", "simulation_queue", "live_ingestion"],
         processed_simulation_runs=processed_runs,
     )
     _write_heartbeat(settings.heartbeat_file)
+
+
+def _run_live_ingestion_if_due() -> None:
+    global _last_live_ingestion
+    now = datetime.now(UTC)
+    interval = timedelta(hours=_LIVE_INGESTION_INTERVAL_HOURS)
+    if _last_live_ingestion is not None and (now - _last_live_ingestion) < interval:
+        return
+
+    log_event(logger, logging.INFO, "worker.live_ingestion.starting")
+    try:
+        results = run_live_ingestion()
+        _last_live_ingestion = now
+        ok = sum(1 for r in results if r["status"] == "ok")
+        err = sum(1 for r in results if r["status"] == "error")
+        total_rows = sum(r["rows_fetched"] for r in results)
+        log_event(
+            logger,
+            logging.INFO,
+            "worker.live_ingestion.completed",
+            adapters_ok=ok,
+            adapters_error=err,
+            total_rows=total_rows,
+        )
+    except Exception as exc:
+        log_event(logger, logging.ERROR, "worker.live_ingestion.failed", error_type=type(exc).__name__, error=str(exc))
 
 
 def _validate_worker_settings(settings: WorkerSettings) -> None:
