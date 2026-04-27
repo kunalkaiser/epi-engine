@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 import { test } from "node:test";
+
+const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("validate-env blocks NEXT_PUBLIC_API_AUTH_TOKEN", () => {
   const result = spawnSync("node", ["scripts/validate-env.mjs"], {
-    cwd: process.cwd(),
+    cwd: WEB_ROOT,
     env: {
       ...process.env,
       NEXT_PUBLIC_API_AUTH_TOKEN: "leak",
@@ -20,7 +24,7 @@ test("validate-env blocks NEXT_PUBLIC_API_AUTH_TOKEN", () => {
 
 test("validate-env requires server token in production", () => {
   const result = spawnSync("node", ["scripts/validate-env.mjs"], {
-    cwd: process.cwd(),
+    cwd: WEB_ROOT,
     env: {
       ...process.env,
       APP_ENV: "production",
@@ -32,4 +36,20 @@ test("validate-env requires server token in production", () => {
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /API_AUTH_TOKEN is required/);
+});
+
+test("validate-env does not enforce production requirements when APP_ENV is unset", () => {
+  const result = spawnSync("node", ["scripts/validate-env.mjs"], {
+    cwd: WEB_ROOT,
+    env: {
+      ...process.env,
+      APP_ENV: "",
+      NODE_ENV: "production",
+      API_BASE_URL: "",
+      API_AUTH_TOKEN: "",
+      NEXT_PUBLIC_API_AUTH_TOKEN: "",
+    },
+    encoding: "utf-8",
+  });
+  assert.equal(result.status, 0);
 });

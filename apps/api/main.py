@@ -84,10 +84,11 @@ from apps.api.response_models import (
     IncidenceResponse,
     PrevalenceResponse,
     RankedIndicationsResponse,
+    RepurposingOpportunitiesResponse,
     TopIndicationsResponse,
 )
 from apps.api.security import AuthClaims, RequestContext, Role, require_authenticated_claims, require_request_context, require_role
-from apps.api.services import list_diseases, list_incidence, list_prevalence, list_ranked_indications, list_top_indications
+from apps.api.services import list_diseases, list_incidence, list_prevalence, list_ranked_indications, list_repurposing_opportunities, list_top_indications
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -321,6 +322,21 @@ def get_ranked_indications(
 ) -> RankedIndicationsResponse:
     audit_log("indications.ranked", payload=filters.model_dump(exclude_none=True))
     return list_ranked_indications(filters)
+
+
+@app.get("/repurposing/opportunities", response_model=RepurposingOpportunitiesResponse)
+@limiter.limit("30/minute")
+def get_repurposing_opportunities(
+    request: Request,
+    _: Role = Depends(require_role("repurposing.opportunities", INDICATION_ROLES)),
+) -> RepurposingOpportunitiesResponse:
+    """
+    Opportunity scanner: top 20 indication+compound pairs with
+    high unmet need + low competition + mechanistic rationale.
+    Compound candidates fetched from evidence-os repurposing gap analysis.
+    """
+    audit_log("repurposing.opportunities", payload={})
+    return list_repurposing_opportunities()
 
 
 @app.get("/auth/me", response_model=AuthMeResponse)

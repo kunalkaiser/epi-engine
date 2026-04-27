@@ -3,6 +3,25 @@ from pydantic import BaseModel, ConfigDict, Field
 from apps.api.contracts import IncidenceAggregate, IndicationScore, PrevalenceAggregate, RankedIndication
 
 
+class RepurposingOpportunity(BaseModel):
+    rank: int = Field(ge=1)
+    indication_name: str
+    epi_scores: dict
+    best_compound: str | None = None
+    best_compound_chembl_id: str | None = None
+    mechanistic_confidence: int = Field(ge=0, le=100)
+    evidence_label: str
+    regulatory_pathway: str
+    opportunity_score: float
+
+
+class RepurposingOpportunitiesResponse(BaseModel):
+    opportunities: list[RepurposingOpportunity]
+    total: int
+    methodology: str
+    generated_at: str
+
+
 class PaginationMeta(BaseModel):
     page: int = Field(ge=1)
     page_size: int = Field(ge=1)

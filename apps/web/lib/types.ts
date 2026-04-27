@@ -381,7 +381,7 @@ export type DebugSnapshot = {
   };
   auth: DebugStatusItem & {
     role: AppRole | "unknown";
-    tokenSource: "forwarded_header" | "env_token" | "none";
+    tokenSource: "forwarded_header" | "env_token" | "generated_token" | "none";
     attached: boolean;
   };
   endpoints: {

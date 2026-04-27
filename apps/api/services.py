@@ -1,3 +1,10 @@
+import json
+import os
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+
 from apps.api.contracts import IndicationScore
 from apps.api.query_models import PaginationParams, RankedIndicationsFilters, RegionTimeFilters, TopIndicationsFilters
 from apps.api.response_models import (
@@ -5,6 +12,8 @@ from apps.api.response_models import (
     IncidenceResponse,
     PrevalenceResponse,
     RankedIndicationsResponse,
+    RepurposingOpportunitiesResponse,
+    RepurposingOpportunity,
     TopIndicationsResponse,
 )
 from apps.api.repository import AnalyticsRepository, build_analytics_repository
@@ -114,6 +123,93 @@ def list_ranked_indications(filters: RankedIndicationsFilters, repository: Analy
         scoring_profile=_scoring_profile_payload(profile, include_details=True),
         methodology=_scoring_methodology_payload(),
         caveats=profile.caveats,
+    )
+
+
+def list_repurposing_opportunities() -> RepurposingOpportunitiesResponse:
+    """
+    Top 20 indication+compound pairs ranked by:
+      opportunity_score = unmet_need (40%) + market_size (30%) + competition (30%)
+    Compound candidates fetched from evidence-os /repurposing/gaps in parallel.
+    """
+    try:
+        filters = TopIndicationsFilters(region="US", limit=20, page=1, page_size=20)
+        top = list_top_indications(filters)
+        items = top.items
+    except Exception:
+        items = []
+
+    scored = sorted(
+        [
+            (item, round(item.unmet_need_score * 0.4 + item.market_size_score * 0.3 + item.competition_score * 0.3, 1))
+            for item in items
+        ],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    evidence_os_url = os.getenv("EVIDENCE_OS_URL", "https://evidence-os-production.up.railway.app").rstrip("/")
+
+    def _fetch_gaps(indication_name: str) -> tuple[str, dict | None]:
+        try:
+            enc = urllib.parse.quote(indication_name)
+            req = urllib.request.Request(
+                f"{evidence_os_url}/repurposing/gaps?indication={enc}",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=25) as r:
+                return indication_name, json.loads(r.read())
+        except Exception:
+            return indication_name, None
+
+    gaps_map: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs = {pool.submit(_fetch_gaps, item.indication_name): item.indication_name for item, _ in scored[:8]}
+        for fut in as_completed(futs):
+            name, result = fut.result()
+            if result:
+                gaps_map[name] = result
+
+    opportunities: list[RepurposingOpportunity] = []
+    for rank, (item, opp_score) in enumerate(scored[:20], start=1):
+        gap_data = gaps_map.get(item.indication_name)
+        top_gap  = ((gap_data or {}).get("top_gaps") or [None])[0]
+
+        approved = top_gap.get("max_phase_approved", 0) if top_gap else 0
+        if approved >= 4:
+            pathway = "505(b)(2) NDA — prior approval in another indication"
+        elif approved > 0:
+            pathway = "Full NDA — insufficient approved use"
+        else:
+            pathway = "IND required — preclinical-stage compound"
+
+        opportunities.append(
+            RepurposingOpportunity(
+                rank=rank,
+                indication_name=item.indication_name,
+                epi_scores={
+                    "unmet_need_score":  item.unmet_need_score,
+                    "market_size_score": item.market_size_score,
+                    "competition_score": item.competition_score,
+                    "opportunity_score": opp_score,
+                },
+                best_compound=top_gap.get("compound") if top_gap else None,
+                best_compound_chembl_id=top_gap.get("chembl_id") if top_gap else None,
+                mechanistic_confidence=top_gap["scores"]["mechanistic_plausibility"] if top_gap else 0,
+                evidence_label=top_gap.get("evidence_label", "No compound data") if top_gap else "No compound data",
+                regulatory_pathway=pathway,
+                opportunity_score=opp_score,
+            )
+        )
+
+    return RepurposingOpportunitiesResponse(
+        opportunities=opportunities,
+        total=len(opportunities),
+        methodology=(
+            "Opportunity score = unmet_need (40%) + market_size (30%) + competition (30%). "
+            "Compound candidates from evidence-os repurposing gap analysis."
+        ),
+        generated_at=datetime.now(UTC).isoformat(),
     )
 
 

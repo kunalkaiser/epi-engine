@@ -30,8 +30,12 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
+      APP_ENV: development
       API_BASE_URL: http://api:8000
-      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZXYtYW5hbHlzdCIsInJvbGUiOiJhbmFseXN0IiwiaXNzIjoiZXBpLWVuZ2luZSIsImF1ZCI6ImVwaS1lbmdpbmUtY2xpZW50cyJ9.fgEAYuZ1C514IX5-wlL5gpG1KUrp3kQepCxz52jLJMY}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-secret}
+      AUTH_JWT_ISSUER: ${AUTH_JWT_ISSUER:-epi-engine}
+      AUTH_JWT_AUDIENCE: ${AUTH_JWT_AUDIENCE:-epi-engine-clients}
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     depends_on:
       api:
@@ -39,7 +43,7 @@ services:
     ports:
       - "3000:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000 || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000 || exit 1"]
       interval: 20s
       timeout: 5s
       retries: 5
@@ -51,6 +55,9 @@ services:
       CLICKHOUSE_DB: epi_engine
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-epi_engine_app}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-epi_engine_dev_password}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infra/sql:/docker-entrypoint-initdb.d:ro
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -68,6 +75,8 @@ services:
     environment:
       APP_ENV: development
       CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-epi_engine_app}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-epi_engine_dev_password}
       WORKER_LOOP_INTERVAL_SECONDS: ${WORKER_LOOP_INTERVAL_SECONDS:-60}
       WORKER_SIMULATION_BATCH_SIZE: ${WORKER_SIMULATION_BATCH_SIZE:-5}
       WORKER_HEARTBEAT_FILE: /tmp/epios-worker-heartbeat
@@ -80,3 +89,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+volumes:
+  clickhouse_data:

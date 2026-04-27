@@ -19,6 +19,7 @@ type AppContextState = {
   backendStatus: "ok" | "degraded" | "error";
   backendDetail: string;
   dqStatus: "ok" | "degraded";
+  accessResolved: boolean;
 };
 
 const ALL_ROLES: Array<AppRole | "unknown"> = [
@@ -48,7 +49,16 @@ const DECISION_ROLES: Array<AppRole | "unknown"> = ["admin", "analyst", "operati
 
 const ADMIN_ROLES: Array<AppRole | "unknown"> = ["admin", "operations", "auditor"];
 
-const NAV_ITEMS: Array<{ href: string; label: string; roles: Array<AppRole | "unknown"> }> = [
+const AUDIT_ROLES: Array<AppRole | "unknown"> = ["admin", "analyst", "read_only_gov"];
+
+type NavItem = {
+  href: string;
+  label: string;
+  roles: Array<AppRole | "unknown">;
+  disabledReason?: string;
+};
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Command Center", roles: ALL_ROLES },
   { href: "/disease-explorer", label: "Disease Explorer", roles: ANALYST_ROLES },
   { href: "/incidence-prevalence", label: "Incidence & Prevalence", roles: ANALYST_ROLES },
@@ -57,11 +67,21 @@ const NAV_ITEMS: Array<{ href: string; label: string; roles: Array<AppRole | "un
   { href: "/simulation-lab", label: "Simulation Lab", roles: DECISION_ROLES },
   { href: "/compare-scenarios", label: "Compare Scenarios", roles: DECISION_ROLES },
   { href: "/data-quality-center", label: "Data Quality", roles: ANALYST_ROLES },
-  { href: "/ingestion-run-center", label: "Ingestion Runs", roles: ADMIN_ROLES },
-  { href: "/audit-viewer", label: "Audit Activity", roles: ADMIN_ROLES },
+  {
+    href: "/ingestion-run-center",
+    label: "Ingestion Runs",
+    roles: ADMIN_ROLES,
+    disabledReason: "Requires admin, operations, or auditor role.",
+  },
+  { href: "/audit-viewer", label: "Audit Activity", roles: AUDIT_ROLES },
   { href: "/methodology-center", label: "Methodology", roles: ALL_ROLES },
   { href: "/health-diagnostics", label: "Health & Runtime", roles: ALL_ROLES },
-  { href: "/admin-tenant-settings", label: "Admin & Tenant", roles: ADMIN_ROLES },
+  {
+    href: "/admin-tenant-settings",
+    label: "Admin & Tenant",
+    roles: ADMIN_ROLES,
+    disabledReason: "Requires admin, operations, or auditor role.",
+  },
 ];
 
 export function AppShell({ title, description, children }: AppShellProps) {
@@ -72,6 +92,7 @@ export function AppShell({ title, description, children }: AppShellProps) {
     backendStatus: "error",
     backendDetail: "Checking backend",
     dqStatus: "ok",
+    accessResolved: false,
   });
 
   useEffect(() => {
@@ -90,6 +111,7 @@ export function AppShell({ title, description, children }: AppShellProps) {
           backendStatus: debug.backend.status === "ok" ? "ok" : "degraded",
           backendDetail: debug.backend.detail,
           dqStatus: dq.status,
+          accessResolved: true,
         });
       } catch (error) {
         if (!mounted) return;
@@ -97,6 +119,7 @@ export function AppShell({ title, description, children }: AppShellProps) {
           ...previous,
           backendStatus: "error",
           backendDetail: error instanceof Error ? error.message : "Backend unavailable",
+          accessResolved: false,
         }));
       }
     }
@@ -127,17 +150,29 @@ export function AppShell({ title, description, children }: AppShellProps) {
         </div>
         <nav className="os-nav-links" aria-label="Platform modules">
           {NAV_ITEMS.map((item) => {
-            const enabled = item.roles.includes(context.role);
+            const enabled = !context.accessResolved || item.roles.includes(context.role);
             const active = pathname === item.href;
             if (!enabled) {
               return (
-                <span key={item.href} className="os-nav-link os-nav-link-disabled" aria-disabled="true">
+                <span
+                  key={item.href}
+                  className="os-nav-link os-nav-link-disabled"
+                  aria-disabled="true"
+                  title={item.disabledReason ?? "Unavailable for your current role."}
+                >
                   {item.label}
                 </span>
               );
             }
+
+            const checkingAccess = !context.accessResolved;
             return (
-              <Link key={item.href} href={item.href} className={`os-nav-link${active ? " os-nav-link-active" : ""}`}>
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`os-nav-link${active ? " os-nav-link-active" : ""}${checkingAccess ? " os-nav-link-pending" : ""}`}
+                title={checkingAccess ? "Access is being resolved; availability may update." : undefined}
+              >
                 {item.label}
               </Link>
             );
@@ -176,4 +211,3 @@ function ContextBadge({ label, value, tone }: { label: string; value: string; to
     </div>
   );
 }
-

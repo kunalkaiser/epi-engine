@@ -1,8 +1,8 @@
-import { DashboardView } from "../components/dashboard-view";
+import { HomepageView } from "../components/homepage-view";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default function HomePage() {
-  return <DashboardView />;
+  return <HomepageView />;
 }

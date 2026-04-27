@@ -117,6 +117,24 @@ CLICKHOUSE_URL=https://... CLICKHOUSE_USER=epi_engine_app CLICKHOUSE_PASSWORD=..
 
 ---
 
+## 5b. New Endpoints — 30-Day Sprint
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| /repurposing/opportunities | POST | Cross-indication repurposing candidates with EPI scores |
+| /indications/scored | GET | Full scored indication list with confidence intervals |
+
+Worker jobs (both run daily via LIVE_INGESTION_INTERVAL_HOURS=24):
+- `live_ingestion`: pulls OpenFDA FAERS, ClinicalTrials.gov, OpenTargets
+- `score_recompute`: recalculates EPI scores for all indications in ClickHouse
+
+Seed production data (run once after schema migrations):
+```bash
+cd ~/epi-engine && python scripts/seed_production_data.py
+```
+
+---
+
 ## 6. Live Ingestion Sources
 
 The worker pulls from three free public APIs daily:

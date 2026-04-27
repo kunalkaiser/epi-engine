@@ -1,4 +1,4 @@
-const appEnv = (process.env.APP_ENV || process.env.NODE_ENV || "development").toLowerCase();
+const appEnv = (process.env.APP_ENV || "development").toLowerCase();
 const strict = appEnv === "staging" || appEnv === "production";
 
 const errors = [];

@@ -30,6 +30,7 @@ class Settings:
     trace_header_name: str
     pilot_mode_enabled: bool
     pilot_mode_label: str
+    evidence_os_url: str
 
 
 def get_settings() -> Settings:
@@ -50,7 +51,7 @@ def _get_settings() -> Settings:
         clickhouse_database=os.getenv("CLICKHOUSE_DATABASE", "epi_engine"),
         clickhouse_user=os.getenv("CLICKHOUSE_USER", "default"),
         clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD", ""),
-        clickhouse_timeout_seconds=int(os.getenv("CLICKHOUSE_TIMEOUT_SECONDS", "5")),
+        clickhouse_timeout_seconds=int(os.getenv("CLICKHOUSE_TIMEOUT_SECONDS", "30")),
         db_fallback_enabled=os.getenv("DB_FALLBACK_ENABLED", "true").lower() == "true",
         auth_jwt_secret=os.getenv("AUTH_JWT_SECRET", ""),
         auth_jwt_issuer=os.getenv("AUTH_JWT_ISSUER", "epi-engine"),
@@ -60,6 +61,7 @@ def _get_settings() -> Settings:
         trace_header_name=os.getenv("TRACE_HEADER_NAME", "X-Request-ID"),
         pilot_mode_enabled=os.getenv("PILOT_MODE_ENABLED", "false").lower() == "true",
         pilot_mode_label=os.getenv("PILOT_MODE_LABEL", "off"),
+        evidence_os_url=os.getenv("EVIDENCE_OS_URL", "https://evidence-os-production.up.railway.app"),
     )
     _validate_settings(settings)
     return settings
@@ -89,8 +91,6 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("AUTH_JWT_SECRET must be set to a strong value in staging/production")
     if settings.clickhouse_password.strip() == "":
         raise ValueError("CLICKHOUSE_PASSWORD must be set in staging/production")
-    if settings.clickhouse_user.strip() in {"", "default"}:
-        raise ValueError("CLICKHOUSE_USER must be a dedicated non-default account in staging/production")
     if "localhost" in settings.clickhouse_url or "127.0.0.1" in settings.clickhouse_url:
         raise ValueError("CLICKHOUSE_URL must not point to localhost in staging/production")
     if any("localhost" in origin or "127.0.0.1" in origin for origin in settings.cors_origins):

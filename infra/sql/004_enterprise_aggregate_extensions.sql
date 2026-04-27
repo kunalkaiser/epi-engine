@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS simulation_run_results
     run_id String,
     scenario_type LowCardinality(String),
     tenant_id LowCardinality(String),
-    region_code Nullable(LowCardinality(String)),
+    region_code Nullable(String),
     indication_id String,
     indication_name String,
     baseline_score Float64,
