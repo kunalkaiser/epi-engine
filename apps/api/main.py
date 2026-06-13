@@ -13,6 +13,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 from apps.api.audit import audit_log, audit_log_export
+from apps.api.db import ClickHouseUnavailableError
 from apps.api.logging_utils import configure_logging, get_logger, log_event
 from apps.api.query_models import (
     DataQualityRunsFilters,
@@ -201,6 +202,25 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
                 "code": "validation_error",
                 "message": "Request validation failed",
                 "details": jsonable_encoder(exc.errors()),
+            }
+        },
+    )
+
+
+@app.exception_handler(ClickHouseUnavailableError)
+async def clickhouse_unavailable_handler(_: Request, exc: ClickHouseUnavailableError) -> JSONResponse:
+    # Analytics datastore (ClickHouse) unreachable. Return a clean 503 instead of letting it
+    # bubble to the catch-all 500 handler — which runs in Starlette's outermost
+    # ServerErrorMiddleware, OUTSIDE CORSMiddleware, so its response carries no CORS headers and
+    # the browser reports it as a CORS error. A specific handler like this runs in the inner
+    # ExceptionMiddleware, so CORSMiddleware still applies and the client degrades gracefully.
+    log_event(logger, logging.WARNING, "request.clickhouse_unavailable")
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "error": {
+                "code": "data_unavailable",
+                "message": "Analytics datastore temporarily unavailable",
             }
         },
     )
