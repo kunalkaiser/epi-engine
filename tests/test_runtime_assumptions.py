@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-REPO_ROOT = Path("/Users/kunal/epi-engine")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_api_dockerfile_matches_expected_entrypoint_and_requirements() -> None:
@@ -11,7 +11,8 @@ def test_api_dockerfile_matches_expected_entrypoint_and_requirements() -> None:
 
     assert "COPY apps/api/requirements.txt ./apps/api/requirements.txt" in dockerfile
     assert "RUN pip install --no-cache-dir -r apps/api/requirements.txt" in dockerfile
-    assert 'CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]' in dockerfile
+    # CMD binds the platform-provided $PORT (Railway) with an 8000 fallback.
+    assert 'CMD ["sh", "-c", "uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]' in dockerfile
 
 
 def test_web_dockerfile_uses_lockfile_and_builds_next_app() -> None:
@@ -32,7 +33,7 @@ def test_compose_wires_api_web_and_clickhouse_defaults() -> None:
     assert "AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-secret}" in compose
     assert "CLICKHOUSE_URL: http://clickhouse:8123" in compose
     assert "CLICKHOUSE_USER: ${CLICKHOUSE_USER:-epi_engine_app}" in compose
-    assert "CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-epi_engine_dev_password}" in compose
+    assert "CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD must be set}" in compose
     assert "API_BASE_URL: http://api:8000" in compose
     assert "API_AUTH_TOKEN: ${API_AUTH_TOKEN:-" in compose
     assert "NEXT_PUBLIC_API_BASE_URL: http://localhost:8000" in compose
