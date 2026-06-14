@@ -21,7 +21,14 @@ jobs:
 
       - name: Security gate - block public auth token env usage
         run: |
-          if grep -RIn "NEXT_PUBLIC_API_AUTH_TOKEN" apps docs docker-compose.yml docker-compose.staging.yml .env*; then
+          # Block any genuine introduction of NEXT_PUBLIC_API_AUTH_TOKEN (it would
+          # leak a token to the browser). Scope to app code, compose, and env files;
+          # docs are excluded (they document the ban and cannot set a runtime env),
+          # and the guard files that *enforce* the ban are excluded by name so the
+          # gate does not trip on its own enforcement code.
+          if grep -RIn "NEXT_PUBLIC_API_AUTH_TOKEN" apps docker-compose.yml docker-compose.staging.yml .env* \
+               --exclude="validate-env.mjs" \
+               --exclude="env-validation.test.mjs"; then
             echo "Forbidden NEXT_PUBLIC_API_AUTH_TOKEN usage found."
             exit 1
           fi
