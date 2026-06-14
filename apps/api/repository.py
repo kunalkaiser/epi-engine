@@ -9,6 +9,7 @@ from apps.api.contracts import IncidenceAggregate, MortalityAggregate, Prevalenc
 from apps.api.data import INCIDENCE_DATA, INDICATION_PROFILES, PREVALENCE_DATA, IndicationProfile
 from apps.api.db import ClickHouseClient, ClickHouseConfig, ClickHouseUnavailableError
 from apps.api.logging_utils import get_logger, log_event
+from apps.api.pg import PostgresClient, PostgresConfig
 from apps.api.query_models import PaginationParams, RankedIndicationsFilters, RegionTimeFilters
 from apps.api.response_models import DiseaseListItem, PaginationMeta
 from apps.api.settings import get_settings
@@ -262,6 +263,233 @@ class ClickHouseAnalyticsRepository:
         return PaginatedResult(items=page_items, pagination=pagination)
 
 
+class PostgresAnalyticsRepository:
+    """Postgres/Supabase read-path repository. Mirrors ClickHouseAnalyticsRepository
+    but in Postgres dialect: count(*) instead of count(), aliased derived tables,
+    and array_agg(DISTINCT ... ORDER BY) / min() in place of the ClickHouse
+    groupArray/any helpers. {name:Type} placeholders are translated to %(name)s by
+    PostgresClient, so the shared WHERE/param helpers below work unchanged.
+    """
+
+    def __init__(self, client: PostgresClient) -> None:
+        self.client = client
+
+    def list_diseases(self, params: PaginationParams) -> PaginatedResult:
+        count_rows = self.client.query_json(
+            """
+            SELECT count(*) AS total_items
+            FROM
+            (
+                SELECT disease_id FROM incidence_facts
+                UNION
+                SELECT disease_id FROM prevalence_facts
+            ) AS distinct_diseases
+            """
+        )
+        total_items = int(count_rows[0]["total_items"]) if count_rows else 0
+        offset = (params.page - 1) * params.page_size
+
+        rows = self.client.query_json(
+            """
+            SELECT
+                disease_id,
+                min(disease_name) AS disease_name,
+                array_agg(DISTINCT region_code ORDER BY region_code) AS regions,
+                min(metric_year) AS year_min,
+                max(metric_year) AS year_max
+            FROM
+            (
+                SELECT disease_id, disease_name, region_code, metric_year
+                FROM incidence_facts
+                UNION ALL
+                SELECT disease_id, disease_name, region_code, metric_year
+                FROM prevalence_facts
+            ) AS disease_years
+            GROUP BY disease_id
+            ORDER BY disease_name ASC
+            LIMIT {limit:UInt64} OFFSET {offset:UInt64}
+            """,
+            {"limit": params.page_size, "offset": offset},
+        )
+        items = [
+            DiseaseListItem(
+                disease_id=row["disease_id"],
+                disease_name=row["disease_name"],
+                regions=list(row["regions"]),
+                year_min=int(row["year_min"]),
+                year_max=int(row["year_max"]),
+            )
+            for row in rows
+        ]
+        return PaginatedResult(items=items, pagination=_build_pagination(params.page, params.page_size, total_items))
+
+    def list_incidence(self, filters: RegionTimeFilters) -> PaginatedResult:
+        where_clause, query_params = _build_region_time_where(filters, "metric_year", "region_code")
+        count_rows = self.client.query_json(
+            f"SELECT count(*) AS total_items FROM incidence_facts {where_clause}",
+            query_params,
+        )
+        total_items = int(count_rows[0]["total_items"]) if count_rows else 0
+        offset = (filters.page - 1) * filters.page_size
+        rows = self.client.query_json(
+            f"""
+            SELECT
+                disease_id,
+                disease_name,
+                region_code,
+                metric_year AS year,
+                incident_cases,
+                population,
+                incidence_per_100k
+            FROM incidence_facts
+            {where_clause}
+            ORDER BY year DESC, disease_name DESC, region_code DESC
+            LIMIT {{limit:UInt64}} OFFSET {{offset:UInt64}}
+            """,
+            {**query_params, "limit": filters.page_size, "offset": offset},
+        )
+        items = [
+            IncidenceAggregate(
+                disease_id=row["disease_id"],
+                disease_name=row["disease_name"],
+                region_code=row["region_code"],
+                year=int(row["year"]),
+                incident_cases=int(row["incident_cases"]),
+                population=int(row["population"]),
+                incidence_per_100k=float(row["incidence_per_100k"]),
+            )
+            for row in rows
+        ]
+        return PaginatedResult(items=items, pagination=_build_pagination(filters.page, filters.page_size, total_items))
+
+    def list_prevalence(self, filters: RegionTimeFilters) -> PaginatedResult:
+        where_clause, query_params = _build_region_time_where(filters, "metric_year", "region_code")
+        count_rows = self.client.query_json(
+            f"SELECT count(*) AS total_items FROM prevalence_facts {where_clause}",
+            query_params,
+        )
+        total_items = int(count_rows[0]["total_items"]) if count_rows else 0
+        offset = (filters.page - 1) * filters.page_size
+        rows = self.client.query_json(
+            f"""
+            SELECT
+                disease_id,
+                disease_name,
+                region_code,
+                metric_year AS year,
+                prevalent_cases,
+                population,
+                prevalence_per_100k
+            FROM prevalence_facts
+            {where_clause}
+            ORDER BY year DESC, disease_name DESC, region_code DESC
+            LIMIT {{limit:UInt64}} OFFSET {{offset:UInt64}}
+            """,
+            {**query_params, "limit": filters.page_size, "offset": offset},
+        )
+        items = [
+            PrevalenceAggregate(
+                disease_id=row["disease_id"],
+                disease_name=row["disease_name"],
+                region_code=row["region_code"],
+                year=int(row["year"]),
+                prevalent_cases=int(row["prevalent_cases"]),
+                population=int(row["population"]),
+                prevalence_per_100k=float(row["prevalence_per_100k"]),
+            )
+            for row in rows
+        ]
+        return PaginatedResult(items=items, pagination=_build_pagination(filters.page, filters.page_size, total_items))
+
+    def list_mortality(self, filters: RegionTimeFilters) -> PaginatedResult:
+        where_clause, query_params = _build_region_time_where(filters, "metric_year", "region_code")
+        count_rows = self.client.query_json(
+            f"SELECT count(*) AS total_items FROM mortality_facts {where_clause}",
+            query_params,
+        )
+        total_items = int(count_rows[0]["total_items"]) if count_rows else 0
+        offset = (filters.page - 1) * filters.page_size
+        rows = self.client.query_json(
+            f"""
+            SELECT
+                disease_id,
+                disease_name,
+                region_code,
+                metric_year AS year,
+                deaths,
+                population,
+                mortality_per_100k
+            FROM mortality_facts
+            {where_clause}
+            ORDER BY year DESC, disease_name DESC, region_code DESC
+            LIMIT {{limit:UInt64}} OFFSET {{offset:UInt64}}
+            """,
+            {**query_params, "limit": filters.page_size, "offset": offset},
+        )
+        items = [
+            MortalityAggregate(
+                disease_id=row["disease_id"],
+                disease_name=row["disease_name"],
+                region_code=row["region_code"],
+                year=int(row["year"]),
+                deaths=int(row["deaths"]),
+                population=int(row["population"]),
+                mortality_per_100k=float(row["mortality_per_100k"]),
+            )
+            for row in rows
+        ]
+        return PaginatedResult(items=items, pagination=_build_pagination(filters.page, filters.page_size, total_items))
+
+    def list_ranked_indication_profiles(self, filters: RankedIndicationsFilters) -> PaginatedResult:
+        where_parts: list[str] = []
+        query_params: dict[str, object] = {}
+        if filters.region is not None:
+            where_parts.append("region_code = {region:String}")
+            query_params["region"] = filters.region
+        where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+        count_rows = self.client.query_json(
+            f"SELECT count(*) AS total_items FROM indication_profile_facts {where_clause}",
+            query_params,
+        )
+        total_items = min(int(count_rows[0]["total_items"]) if count_rows else 0, filters.limit)
+        rows = self.client.query_json(
+            f"""
+            SELECT
+                indication_id,
+                indication_name,
+                region_code,
+                incidence,
+                prevalence,
+                unmet_need,
+                market_size,
+                competition_penalty,
+                equity_score
+            FROM indication_profile_facts
+            {where_clause}
+            ORDER BY indication_name ASC
+            LIMIT {{limit:UInt64}}
+            """,
+            {**query_params, "limit": filters.limit},
+        )
+        items = [
+            IndicationProfile(
+                indication_id=row["indication_id"],
+                indication_name=row["indication_name"],
+                region_code=row["region_code"],
+                incidence=float(row["incidence"]),
+                prevalence=float(row["prevalence"]),
+                unmet_need=float(row["unmet_need"]),
+                market_size=float(row["market_size"]),
+                competition_penalty=float(row["competition_penalty"]),
+                equity_score=float(row["equity_score"]),
+            )
+            for row in rows
+        ]
+        page_items, pagination = _paginate(items, filters.page, filters.page_size, total_items_override=total_items)
+        return PaginatedResult(items=page_items, pagination=pagination)
+
+
 class SyntheticAnalyticsRepository:
     def list_diseases(self, params: PaginationParams) -> PaginatedResult:
         grouped: dict[str, DiseaseListItem] = {}
@@ -336,32 +564,43 @@ class SyntheticAnalyticsRepository:
 
 def build_analytics_repository() -> AnalyticsRepository:
     settings = get_settings()
-    clickhouse = ClickHouseAnalyticsRepository(
-        ClickHouseClient(
-            ClickHouseConfig(
-                base_url=settings.clickhouse_url,
-                database=settings.clickhouse_database,
-                user=settings.clickhouse_user,
-                password=settings.clickhouse_password,
-                timeout_seconds=settings.clickhouse_timeout_seconds,
+    if settings.db_backend == "postgres":
+        primary: AnalyticsRepository = PostgresAnalyticsRepository(
+            PostgresClient(
+                PostgresConfig(
+                    dsn=settings.database_url,
+                    schema=settings.pg_schema,
+                    timeout_seconds=settings.pg_timeout_seconds,
+                )
             )
         )
-    )
+    else:
+        primary = ClickHouseAnalyticsRepository(
+            ClickHouseClient(
+                ClickHouseConfig(
+                    base_url=settings.clickhouse_url,
+                    database=settings.clickhouse_database,
+                    user=settings.clickhouse_user,
+                    password=settings.clickhouse_password,
+                    timeout_seconds=settings.clickhouse_timeout_seconds,
+                )
+            )
+        )
     if settings.app_env != "development":
-        return clickhouse
+        return primary
     try:
-        clickhouse.client.query_json("SELECT 1 AS ok")
-        _ensure_dev_indication_profiles_seeded(clickhouse)
-        return clickhouse
+        primary.client.query_json("SELECT 1 AS ok")
+        _ensure_dev_indication_profiles_seeded(primary)
+        return primary
     except ClickHouseUnavailableError:
         if settings.db_fallback_enabled:
-            log_event(logger, logging.WARNING, "repository.synthetic_fallback", reason="clickhouse_unavailable")
+            log_event(logger, logging.WARNING, "repository.synthetic_fallback", reason="backend_unavailable")
             return SyntheticAnalyticsRepository()
         raise
 
 
-def _ensure_dev_indication_profiles_seeded(repository: ClickHouseAnalyticsRepository) -> None:
-    count_rows = repository.client.query_json("SELECT count() AS total_items FROM indication_profile_facts")
+def _ensure_dev_indication_profiles_seeded(repository: AnalyticsRepository) -> None:
+    count_rows = repository.client.query_json("SELECT count(*) AS total_items FROM indication_profile_facts")
     total_items = int(count_rows[0]["total_items"]) if count_rows else 0
     if total_items > 0:
         return
