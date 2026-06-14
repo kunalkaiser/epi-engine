@@ -66,7 +66,7 @@ def test_build_repository_seeds_indication_profiles_when_clickhouse_table_is_emp
         calls.append((sql, parameters))
         if "SELECT 1 AS ok" in sql:
             return [{"ok": 1}]
-        if "SELECT count() AS total_items FROM indication_profile_facts" in sql:
+        if "SELECT count(*) AS total_items FROM indication_profile_facts" in sql:
             return [{"total_items": 0}]
         if "INSERT INTO indication_profile_facts" in sql:
             return []
@@ -91,7 +91,7 @@ def test_build_repository_skips_seed_when_indication_profiles_exist(monkeypatch)
         calls.append((sql, parameters))
         if "SELECT 1 AS ok" in sql:
             return [{"ok": 1}]
-        if "SELECT count() AS total_items FROM indication_profile_facts" in sql:
+        if "SELECT count(*) AS total_items FROM indication_profile_facts" in sql:
             return [{"total_items": 3}]
         if "INSERT INTO indication_profile_facts" in sql:
             raise AssertionError("seed insert should not run when rows already exist")

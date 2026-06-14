@@ -27,7 +27,7 @@ def test_settings_use_defaults(monkeypatch) -> None:
     assert settings.clickhouse_database == "epi_engine"
     assert settings.clickhouse_user == "default"
     assert settings.clickhouse_password == ""
-    assert settings.clickhouse_timeout_seconds == 5
+    assert settings.clickhouse_timeout_seconds == 30
     assert settings.db_fallback_enabled is True
     assert settings.auth_jwt_secret == ""
     assert settings.auth_jwt_issuer == "epi-engine"
