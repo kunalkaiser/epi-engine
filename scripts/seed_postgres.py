@@ -28,7 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from seed_production_data import INCIDENCE_DATA, PREVALENCE_DATA, INDICATION_PROFILES  # noqa: E402
 
 SCHEMA = os.getenv("PG_SCHEMA", "epi_engine")
-SCHEMA_FILE = Path(__file__).resolve().parents[1] / "infra" / "sql" / "pg" / "001_epi_engine_schema.sql"
+PG_SQL_DIR = Path(__file__).resolve().parents[1] / "infra" / "sql" / "pg"
+# All Postgres schema files, applied in filename order (001 read path, 002 platform).
+SCHEMA_FILES = sorted(PG_SQL_DIR.glob("*.sql"))
 
 
 def _incidence_rows() -> list[tuple]:
@@ -73,8 +75,9 @@ def main() -> int:
 
     with psycopg.connect(args.database_url, options=f"-c search_path={SCHEMA},public") as conn:
         with conn.cursor() as cur:
-            print(f"Applying schema from {SCHEMA_FILE.name} ...")
-            cur.execute(SCHEMA_FILE.read_text())
+            for schema_file in SCHEMA_FILES:
+                print(f"Applying schema from {schema_file.name} ...")
+                cur.execute(schema_file.read_text())
             if args.schema_only:
                 conn.commit()
                 print("  ✓ schema applied (data skipped)")

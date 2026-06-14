@@ -726,6 +726,21 @@ class PlatformPersistenceRepository:
 
 def build_platform_repository() -> PlatformPersistenceRepository:
     settings = get_settings()
+    if settings.db_backend == "postgres":
+        # Lazy import avoids a circular import (the PG repo subclasses this module's class).
+        from apps.api.pg import PostgresClient, PostgresConfig
+        from apps.api.platform_repository_pg import PostgresPlatformRepository
+
+        pg_client = PostgresClient(
+            PostgresConfig(
+                dsn=settings.database_url,
+                schema=settings.pg_schema,
+                timeout_seconds=settings.pg_timeout_seconds,
+            )
+        )
+        pg_client.query_json("SELECT 1 AS ok")  # deterministic startup probe
+        return PostgresPlatformRepository(pg_client)
+
     client = ClickHouseClient(
         ClickHouseConfig(
             base_url=settings.clickhouse_url,
