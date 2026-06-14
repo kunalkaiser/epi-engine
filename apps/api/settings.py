@@ -16,11 +16,15 @@ class Settings:
     api_host: str
     api_port: int
     cors_origins: tuple[str, ...]
+    db_backend: str
     clickhouse_url: str
     clickhouse_database: str
     clickhouse_user: str
     clickhouse_password: str
     clickhouse_timeout_seconds: int
+    database_url: str
+    pg_schema: str
+    pg_timeout_seconds: int
     db_fallback_enabled: bool
     auth_jwt_secret: str
     auth_jwt_issuer: str
@@ -47,11 +51,15 @@ def _get_settings() -> Settings:
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8000")),
         cors_origins=origins,
+        db_backend=os.getenv("DB_BACKEND", "clickhouse").lower(),
         clickhouse_url=os.getenv("CLICKHOUSE_URL", "http://localhost:8123"),
         clickhouse_database=os.getenv("CLICKHOUSE_DATABASE", "epi_engine"),
         clickhouse_user=os.getenv("CLICKHOUSE_USER", "default"),
         clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD", ""),
         clickhouse_timeout_seconds=int(os.getenv("CLICKHOUSE_TIMEOUT_SECONDS", "30")),
+        database_url=os.getenv("DATABASE_URL", ""),
+        pg_schema=os.getenv("PG_SCHEMA", "epi_engine"),
+        pg_timeout_seconds=int(os.getenv("PG_TIMEOUT_SECONDS", "10")),
         db_fallback_enabled=os.getenv("DB_FALLBACK_ENABLED", "true").lower() == "true",
         auth_jwt_secret=os.getenv("AUTH_JWT_SECRET", ""),
         auth_jwt_issuer=os.getenv("AUTH_JWT_ISSUER", "epi-engine"),
@@ -80,6 +88,8 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("PILOT_MODE_LABEL must not be empty")
     if not settings.cors_origins:
         raise ValueError("API_CORS_ORIGINS must include at least one origin")
+    if settings.db_backend not in {"clickhouse", "postgres"}:
+        raise ValueError("DB_BACKEND must be 'clickhouse' or 'postgres'")
 
     non_dev = settings.app_env in {"staging", "production"}
     if not non_dev:
@@ -89,9 +99,15 @@ def _validate_settings(settings: Settings) -> None:
         raise ValueError("DB_FALLBACK_ENABLED must be false in staging/production")
     if settings.auth_jwt_secret in INSECURE_DEFAULT_SECRETS:
         raise ValueError("AUTH_JWT_SECRET must be set to a strong value in staging/production")
-    if settings.clickhouse_password.strip() == "":
-        raise ValueError("CLICKHOUSE_PASSWORD must be set in staging/production")
-    if "localhost" in settings.clickhouse_url or "127.0.0.1" in settings.clickhouse_url:
-        raise ValueError("CLICKHOUSE_URL must not point to localhost in staging/production")
+    if settings.db_backend == "postgres":
+        if settings.database_url.strip() == "":
+            raise ValueError("DATABASE_URL must be set when DB_BACKEND=postgres in staging/production")
+        if "localhost" in settings.database_url or "127.0.0.1" in settings.database_url:
+            raise ValueError("DATABASE_URL must not point to localhost in staging/production")
+    else:
+        if settings.clickhouse_password.strip() == "":
+            raise ValueError("CLICKHOUSE_PASSWORD must be set in staging/production")
+        if "localhost" in settings.clickhouse_url or "127.0.0.1" in settings.clickhouse_url:
+            raise ValueError("CLICKHOUSE_URL must not point to localhost in staging/production")
     if any("localhost" in origin or "127.0.0.1" in origin for origin in settings.cors_origins):
         raise ValueError("API_CORS_ORIGINS must not contain localhost in staging/production")
